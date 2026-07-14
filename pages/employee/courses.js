@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { useProfile } from "../../lib/useProfile";
-import { loadEmployeeData, courseProgress, Ring } from "../../lib/lms";
+import { loadEmployeeData, courseProgress } from "../../lib/lms";
 import Sidebar from "../../components/Sidebar";
 
-export default function EmployeeHome() {
+export default function Courses() {
   const { loading, me } = useProfile("employee");
   const router = useRouter();
   const [data, setData] = useState(null);
@@ -16,28 +16,15 @@ export default function EmployeeHome() {
 
   if (loading || !data) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
-  const allLessons = data.courses.flatMap((c) => data.lessonsByCourse[c.id] || []);
-  const overall = courseProgress(allLessons, data.completed);
-
   return (
     <div className="shell">
       <Sidebar role="employee" me={me} />
       <main className="content">
-        <h1 className="page">Hi {me.full_name.split(" ")[0]} 👋</h1>
-        <p className="sub">Welcome to PitchLab, Petpooja's sales training portal.</p>
+        <h1 className="page">Courses</h1>
+        <p className="sub">Work through your assigned training.</p>
 
-        <div className="grid3">
-          <div className="tile" style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Ring value={overall.pct} />
-            <div><div className="kpi">{overall.pct}%</div><div className="kpi-label">Overall completion</div></div>
-          </div>
-          <div className="tile"><div className="kpi">{data.courses.length}</div><div className="kpi-label">Courses assigned</div></div>
-          <div className="tile"><div className="kpi">{overall.done}/{overall.total}</div><div className="kpi-label">Lessons completed</div></div>
-        </div>
-
-        <div className="section-label">Your courses</div>
         {data.courses.length === 0 ? (
-          <div className="card pad mini">No courses assigned yet. Your admin will assign training to you soon.</div>
+          <div className="card pad mini">No courses assigned yet.</div>
         ) : (
           <div className="grid2">
             {data.courses.map((c) => {
@@ -50,7 +37,7 @@ export default function EmployeeHome() {
                   </div>
                   <div className="course-desc">{c.description}</div>
                   <div className="progress"><i style={{ width: `${p.pct}%` }} /></div>
-                  <div className="mini">{p.done} of {p.total} lessons</div>
+                  <div className="mini">{p.done} of {p.total} lessons · {p.pct}%</div>
                 </div>
               );
             })}

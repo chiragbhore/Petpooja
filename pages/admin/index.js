@@ -7,16 +7,40 @@ import Sidebar from "../../components/Sidebar";
 export default function AdminHome() {
   const { loading, me } = useProfile("admin");
   const router = useRouter();
-  const [count, setCount] = useState(null);
+  const [stats, setStats] = useState(null);
 
   useEffect(() => {
     if (loading) return;
     (async () => {
-      const { count } = await supabase
-        .from("profiles")
-        .select("*", { count: "exact", head: true })
-        .eq("role", "employee");
-      setCount(count ?? 0);
+      const [{ data: emps }, { data: courses }, { data: lessons }, { data: enr }, { data: prog }] =
+        await Promise.all([
+          supabase.from("profiles").select("id").eq("role", "employee"),
+          supabase.from("courses").select("id"),
+          supabase.from("lessons").select("id, course_id"),
+          supabase.from("enrollments").select("user_id, course_id"),
+          supabase.from("lesson_progress").select("user_id, lesson_id"),
+        ]);
+
+      // average completion across employees
+      const lessonsByCourse = {};
+      (lessons || []).forEach((l) => { (lessonsByCourse[l.course_id] = lessonsByCourse[l.course_id] || []).push(l.id); });
+      const doneByUser = {};
+      (prog || []).forEach((p) => { (doneByUser[p.user_id] = doneByUser[p.user_id] || new Set()).add(p.lesson_id); });
+
+      let sum = 0, n = 0;
+      (emps || []).forEach((e) => {
+        const myCourses = (enr || []).filter((x) => x.user_id === e.id).map((x) => x.course_id);
+        const total = myCourses.reduce((a, cid) => a + (lessonsByCourse[cid] || []).length, 0);
+        if (total === 0) { return; }
+        const done = myCourses.reduce((a, cid) => a + (lessonsByCourse[cid] || []).filter((lid) => doneByUser[e.id]?.has(lid)).length, 0);
+        sum += Math.round((done / total) * 100); n += 1;
+      });
+
+      setStats({
+        employees: (emps || []).length,
+        courses: (courses || []).length,
+        avg: n ? Math.round(sum / n) : 0,
+      });
     })();
   }, [loading]);
 
@@ -29,32 +53,24 @@ export default function AdminHome() {
         <h1 className="page">Welcome, {me.full_name.split(" ")[0]}</h1>
         <p className="sub">Petpooja PitchLab — admin console.</p>
 
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <div className="card pad" style={{ minWidth: 200 }}>
-            <div className="mini">Employees</div>
-            <div style={{ fontSize: 32, fontWeight: 800 }}>{count ?? "…"}</div>
-          </div>
-          <div className="card pad" style={{ minWidth: 200 }}>
-            <div className="mini">Your role</div>
-            <div style={{ fontSize: 32, fontWeight: 800, textTransform: "capitalize" }}>Admin</div>
-          </div>
+        <div className="grid3">
+          <div className="tile"><div className="kpi">{stats?.employees ?? "…"}</div><div className="kpi-label">Employees</div></div>
+          <div className="tile"><div className="kpi">{stats?.courses ?? "…"}</div><div className="kpi-label">Courses</div></div>
+          <div className="tile"><div className="kpi">{stats?.avg ?? "…"}%</div><div className="kpi-label">Avg completion</div></div>
         </div>
 
-        <div className="card pad" style={{ marginTop: 20 }}>
-          <div className="row-between">
-            <div>
-              <div style={{ fontWeight: 700 }}>Manage your team</div>
-              <div className="mini">Create employee logins and remove people who leave.</div>
-            </div>
-            <button className="btn primary" onClick={() => router.push("/admin/employees")}>
-              Go to Team
-            </button>
+        <div className="grid2" style={{ marginTop: 20 }}>
+          <div className="card pad">
+            <div style={{ fontWeight: 700 }}>Build training</div>
+            <div className="mini" style={{ marginBottom: 12 }}>Create courses and roleplay scenarios.</div>
+            <button className="btn primary" onClick={() => router.push("/admin/courses")}>Manage courses</button>
+          </div>
+          <div className="card pad">
+            <div style={{ fontWeight: 700 }}>Your team</div>
+            <div className="mini" style={{ marginBottom: 12 }}>Add people and assign them training.</div>
+            <button className="btn dark" onClick={() => router.push("/admin/employees")}>Manage team</button>
           </div>
         </div>
-
-        <p className="mini" style={{ marginTop: 24 }}>
-          Courses and roleplay training will appear here in the next update.
-        </p>
       </main>
     </div>
   );
