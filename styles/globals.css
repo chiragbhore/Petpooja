@@ -104,4 +104,4 @@ input:focus, select:focus { border-color: var(--red); background: #fff; }
 .msg.ok { background: #e8f6ee; color: #15803d; }
 .spacer { flex: 1; }
 .mini { font-size: 12px; color: var(--muted); }
-.logo-lg { height: 34px; margin-bottom: 22px; }
+.logo-lg { display: block; width: 176px; height: auto; object-fit: contain; margin-bottom: 22px; }
