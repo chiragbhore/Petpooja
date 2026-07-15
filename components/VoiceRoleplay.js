@@ -38,6 +38,9 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const transcriptRef = useRef([]); // {role, text}
   const curInRef = useRef("");
   const curOutRef = useRef("");
+  const recorderRef = useRef(null);
+  const recChunksRef = useRef([]);
+  const recDestRef = useRef(null); // MediaStreamDestination mixing mic + prospect audio
 
   const authHeader = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -49,6 +52,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
     try { inCtxRef.current && inCtxRef.current.close(); } catch {}
     try { sessionRef.current && sessionRef.current.close(); } catch {}
+    try { recorderRef.current && recorderRef.current.state !== "inactive" && recorderRef.current.stop(); } catch {}
     sessionRef.current = null;
   };
 
@@ -65,6 +69,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(ctx.destination);
+    if (recDestRef.current) src.connect(recDestRef.current);
     const now = ctx.currentTime;
     const start = Math.max(now, nextPlayRef.current);
     src.start(start);
@@ -91,6 +96,8 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       const outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
       outCtxRef.current = outCtx;
       nextPlayRef.current = 0;
+      const recDest = outCtx.createMediaStreamDestination();
+      recDestRef.current = recDest;
 
       const session = await ai.live.connect({
         model: json.model,
@@ -139,6 +146,22 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       source.connect(proc);
       proc.connect(inCtx.destination);
 
+      // mix the rep's mic into the same recording as the prospect's voice
+      try {
+        const micSrc = outCtx.createMediaStreamSource(stream);
+        micSrc.connect(recDest);
+      } catch {}
+
+      // start recording the mixed call audio
+      try {
+        recChunksRef.current = [];
+        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+        const recorder = new MediaRecorder(recDest.stream, { mimeType: mime });
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recChunksRef.current.push(e.data); };
+        recorder.start(1000);
+        recorderRef.current = recorder;
+      } catch {}
+
       setState("live");
     } catch (e) {
       setError(e.message || "Could not start the call.");
@@ -148,10 +171,18 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   };
 
   const end = async () => {
+    // grab the recorder's final chunk before we tear everything down
+    let blob = null;
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      blob = await new Promise((resolve) => {
+        recorderRef.current.onstop = () => resolve(new Blob(recChunksRef.current, { type: "audio/webm" }));
+        try { recorderRef.current.stop(); } catch { resolve(null); }
+      });
+    }
+
     cleanup();
     setState("ended");
     setSpeaking(false);
-    // flush any partial transcript
     if (curInRef.current.trim()) transcriptRef.current.push({ role: "REP", text: curInRef.current.trim() });
     if (curOutRef.current.trim()) transcriptRef.current.push({ role: "PROSPECT", text: curOutRef.current.trim() });
 
@@ -160,43 +191,106 @@ export default function VoiceRoleplay({ scenario, onClose }) {
 
     setScoring(true);
     try {
+      const headers = await authHeader();
+
+      // 1) upload the recording (best-effort — scoring still proceeds if this fails)
+      let recordingPath = null;
+      if (blob && blob.size > 0) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const fileName = `${session.user.id}/${scenario.id}-${Date.now()}.webm`;
+        const { error: upErr } = await supabase.storage.from("call-recordings").upload(fileName, blob, {
+          contentType: "audio/webm", upsert: false,
+        });
+        if (!upErr) recordingPath = fileName;
+      }
+
+      // 2) score the call against the audit parameters
       const res = await fetch("/api/score-roleplay", {
-        method: "POST", headers: await authHeader(),
-        body: JSON.stringify({ scenarioId: scenario.id, transcript }),
+        method: "POST", headers,
+        body: JSON.stringify({ scenarioId: scenario.id, transcript, recordingPath }),
       });
       const json = await res.json();
-      if (json.saved) setReport(json.scores);
+      if (json.saved) setReport(json.report);
     } catch {}
     setScoring(false);
   };
 
-  const bars = report && [
-    ["Rapport", report.rapport], ["Discovery", report.discovery],
-    ["Objection handling", report.objection], ["Closing", report.closing],
-  ];
+  const authHeaderNote = null; // (kept for clarity; auth handled inline above)
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }}
          onClick={() => { cleanup(); onClose(); }}>
-      <div className="card pad" style={{ width: 460, maxWidth: "100%" }} onClick={(e) => e.stopPropagation()}>
+      <div className="card pad" style={{ width: report ? 620 : 460, maxWidth: "100%" }} onClick={(e) => e.stopPropagation()}>
         <div className="row-between" style={{ marginBottom: 12 }}>
           <b>{scenario.title}</b>
           <span style={{ cursor: "pointer", color: "#9aa0aa" }} onClick={() => { cleanup(); onClose(); }}>✕</span>
         </div>
 
         {report ? (
-          <div>
-            <div style={{ textAlign: "center", marginBottom: 12 }}>
-              <div className="kpi" style={{ fontSize: 40 }}>{report.overall}</div>
-              <div className="kpi-label">Overall score</div>
-              <p className="mini" style={{ marginTop: 8 }}>{report.verdict}</p>
+          <div className="scroll" style={{ maxHeight: "72vh", overflowY: "auto", paddingRight: 4 }}>
+            <div className="grid2" style={{ marginBottom: 12 }}>
+              <div className="tile"><div className="kpi-label">Overall Score</div><div className="kpi">{report.overall}/100</div></div>
+              <div className="tile"><div className="kpi-label">Priority Action</div><div style={{ fontSize: 13 }}>{report.priority_action}</div></div>
             </div>
-            {bars.map(([label, v]) => (
-              <div key={label} style={{ marginBottom: 10 }}>
-                <div className="row-between mini" style={{ marginBottom: 4 }}><span>{label}</span><b>{v}</b></div>
-                <div className="progress"><i style={{ width: `${v}%` }} /></div>
+            <div className="tile" style={{ marginBottom: 12 }}>
+              <div className="kpi-label">Executive Summary</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>{report.executive_summary}</div>
+            </div>
+            {report.progress_note && (
+              <div className="tile" style={{ marginBottom: 12 }}>
+                <div className="kpi-label">Progress Note</div>
+                <div style={{ fontSize: 13, marginTop: 4 }}>{report.progress_note}</div>
               </div>
-            ))}
+            )}
+
+            {report.strengths?.length > 0 && (
+              <div className="tile" style={{ marginBottom: 12, background: "#e8f6ee", borderColor: "#cdead9" }}>
+                <div className="kpi-label" style={{ color: "#15803d" }}>Strengths</div>
+                {report.strengths.map((s, i) => <div key={i} style={{ fontSize: 13, marginTop: 6 }}>✓ {s}</div>)}
+              </div>
+            )}
+            {report.improvements?.length > 0 && (
+              <div className="tile" style={{ marginBottom: 12, background: "#fdeaec", borderColor: "#f0c9cd" }}>
+                <div className="kpi-label" style={{ color: "var(--red-dark)" }}>Areas of Improvement</div>
+                {report.improvements.map((s, i) => <div key={i} style={{ fontSize: 13, marginTop: 6 }}>✕ {s}</div>)}
+              </div>
+            )}
+
+            <div className="kpi-label" style={{ margin: "16px 0 8px" }}>Evaluation Feedback</div>
+            <div className="grid2">
+              {Object.entries(report.parameter_scores || {}).map(([name, v]) => (
+                <div key={name} className="tile">
+                  <div className="row-between"><b style={{ fontSize: 13 }}>{name}</b><span className="pill red">{v.score}%</span></div>
+                  <div className="mini" style={{ marginTop: 6 }}>{v.comment}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid2" style={{ marginTop: 12 }}>
+              <div className="tile"><div className="kpi-label">Empathy Score</div><div className="kpi" style={{ fontSize: 24 }}>{report.empathy_score}/100</div></div>
+              <div className="tile"><div className="kpi-label">Adaptability Score</div><div className="kpi" style={{ fontSize: 24 }}>{report.adaptability_score}/100</div></div>
+            </div>
+            {report.ei_feedback && <div className="mini" style={{ marginTop: 8 }}>{report.ei_feedback}</div>}
+
+            {report.coachable_moments?.length > 0 && (
+              <>
+                <div className="kpi-label" style={{ margin: "16px 0 8px" }}>Coachable Moments</div>
+                {report.coachable_moments.map((m, i) => (
+                  <div key={i} className="tile" style={{ marginBottom: 10 }}>
+                    <div className="mini">Turn {m.turn}</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}><b>You said:</b> {m.said}</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}><b>Why it matters:</b> {m.why_it_matters}</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}><b>Better approach:</b> {m.better_approach}</div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {report.recording_url && (
+              <a href={report.recording_url} target="_blank" rel="noreferrer" className="btn outline full" style={{ marginTop: 8 }}>
+                ⬇ Download call recording
+              </a>
+            )}
             <button className="btn primary full" style={{ marginTop: 8 }} onClick={() => { cleanup(); onClose(); }}>Done</button>
           </div>
         ) : (
