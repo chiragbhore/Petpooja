@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
 const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash";
+const TEXT_MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
 const RECORDING_DAYS = 30;
 
 // Petpooja's audit parameters — the exact rubric every call is scored against.
@@ -82,11 +83,24 @@ ${transcript}`;
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const result = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: { responseMimeType: "application/json" },
-    });
+
+    const modelsToTry = [TEXT_MODEL, ...TEXT_MODEL_FALLBACKS.filter((m) => m !== TEXT_MODEL)];
+    let result = null;
+    let lastErr = null;
+    for (const model of modelsToTry) {
+      try {
+        result = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+        break;
+      } catch (e) {
+        lastErr = e;
+        result = null;
+      }
+    }
+    if (!result) throw lastErr || new Error("No Gemini model responded.");
     const text = (result.text || "").replace(/```json|```/g, "").trim();
     let r;
     try { r = JSON.parse(text); } catch { return res.status(200).json({ saved: false, error: "Could not parse the report." }); }

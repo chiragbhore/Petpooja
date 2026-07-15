@@ -50,7 +50,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const cleanup = () => {
     try { procRef.current && procRef.current.disconnect(); } catch {}
     try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
-    try { inCtxRef.current && inCtxRef.current.close(); } catch {}
+    try { inCtxRef.current && inCtxRef.current.state !== "closed" && inCtxRef.current.close(); } catch {}
     try { sessionRef.current && sessionRef.current.close(); } catch {}
     try { recorderRef.current && recorderRef.current.state !== "inactive" && recorderRef.current.stop(); } catch {}
     sessionRef.current = null;
@@ -202,6 +202,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           contentType: "audio/webm", upsert: false,
         });
         if (!upErr) recordingPath = fileName;
+        else console.warn("Recording upload failed (report will still be generated):", upErr.message);
       }
 
       // 2) score the call against the audit parameters
@@ -210,6 +211,11 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         body: JSON.stringify({ scenarioId: scenario.id, transcript, recordingPath }),
       });
       const json = await res.json();
+      if (!res.ok || !json.saved) {
+        setError(json.error || "Could not generate the report. Please try again.");
+        setScoring(false);
+        return;
+      }
       if (json.saved) setReport(json.report);
     } catch {}
     setScoring(false);
