@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
+import VoiceRoleplay from "../../components/VoiceRoleplay";
 
 export default function Roleplay() {
   const { loading, me } = useProfile("employee");
@@ -21,7 +22,7 @@ export default function Roleplay() {
       <Sidebar role="employee" me={me} />
       <main className="content">
         <h1 className="page">Roleplay practice</h1>
-        <p className="sub">Practice a live sales call against a realistic prospect.</p>
+        <p className="sub">Practice a live sales call against a realistic prospect. You'll be scored at the end.</p>
 
         {scenarios.length === 0 ? (
           <div className="card pad mini">No roleplay scenarios yet. Your admin will add some soon.</div>
@@ -41,30 +42,7 @@ export default function Roleplay() {
           </div>
         )}
 
-        {active && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }} onClick={() => setActive(null)}>
-            <div className="card pad" style={{ width: 460, maxWidth: "100%" }} onClick={(e) => e.stopPropagation()}>
-              <div className="row-between" style={{ marginBottom: 10 }}>
-                <b>{active.title}</b>
-                <span className="btn ghost" style={{ cursor: "pointer" }} onClick={() => setActive(null)}>✕</span>
-              </div>
-              <div style={{ border: "2px dashed var(--line)", borderRadius: 12, padding: 26, textAlign: "center" }}>
-                <div style={{ fontSize: 34 }}>🎙️</div>
-                <div style={{ fontWeight: 700, marginTop: 8 }}>Voice roleplay connects here</div>
-                <p className="mini" style={{ marginTop: 6 }}>
-                  Your Petpooja voice agent will run this call and score it. We'll wire it in as the final step.
-                </p>
-              </div>
-              <div className="mini" style={{ marginTop: 14 }}>
-                <b>Scenario brief</b><br />
-                Persona: {active.persona}<br />
-                {active.traits && <>Traits: {active.traits}<br /></>}
-                {active.objections && <>Objections: {active.objections}<br /></>}
-                {active.goal && <>Goal: {active.goal}</>}
-              </div>
-            </div>
-          </div>
-        )}
+        {active && <VoiceRoleplay scenario={active} onClose={() => setActive(null)} />}
       </main>
     </div>
   );
