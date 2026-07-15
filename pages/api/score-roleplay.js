@@ -1,8 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
-const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash-lite";
-const TEXT_MODEL_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
+const GROQ_MODEL = process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile";
+const GROQ_MODEL_FALLBACKS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 const RECORDING_DAYS = 30;
 
 // Petpooja's audit parameters — the exact rubric every call is scored against.
@@ -27,7 +26,7 @@ async function requireUser(req) {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
-  if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: "Missing GEMINI_API_KEY." });
+  if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: "Missing GROQ_API_KEY." });
 
   const gate = await requireUser(req);
   if (gate.error) return res.status(gate.status).json({ error: gate.error });
@@ -82,59 +81,13 @@ Transcript:
 ${transcript}`;
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    const modelsToTry = [TEXT_MODEL, ...TEXT_MODEL_FALLBACKS.filter((m) => m !== TEXT_MODEL)];
-    let result = null;
+    const modelsToTry = [GROQ_MODEL, ...GROQ_MODEL_FALLBACKS.filter((m) => m !== GROQ_MODEL)];
+    let text = null;
     let lastErr = null;
     for (const model of modelsToTry) {
       try {
-        result = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: { responseMimeType: "application/json" },
-        });
-        break;
-      } catch (e) {
-        lastErr = e;
-        result = null;
-      }
-    }
-    if (!result) throw lastErr || new Error("No Gemini model responded.");
-    const text = (result.text || "").replace(/```json|```/g, "").trim();
-    let r;
-    try { r = JSON.parse(text); } catch { return res.status(200).json({ saved: false, error: "Could not parse the report." }); }
-
-    const clamp = (n) => Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
-    const cleanParams = {};
-    PARAMETERS.forEach((p) => {
-      const v = r.parameter_scores?.[p] || {};
-      cleanParams[p] = { score: clamp(v.score), comment: String(v.comment || "").slice(0, 300) };
-    });
-
-
-    const row = {
-      user_id: gate.userId,
-      scenario_id: scenarioId || null,
-      overall: clamp(r.overall),
-      priority_action: String(r.priority_action || "").slice(0, 400),
-      executive_summary: String(r.executive_summary || "").slice(0, 800),
-      progress_note: String(r.progress_note || "").slice(0, 400),
-      strengths: Array.isArray(r.strengths) ? r.strengths.slice(0, 6) : [],
-      improvements: Array.isArray(r.improvements) ? r.improvements.slice(0, 6) : [],
-      parameter_scores: cleanParams,
-      coachable_moments: Array.isArray(r.coachable_moments) ? r.coachable_moments.slice(0, 3) : [],
-      empathy_score: clamp(r.empathy_score),
-      adaptability_score: clamp(r.adaptability_score),
-      ei_feedback: String(r.ei_feedback || "").slice(0, 400),
-      verdict: String(r.executive_summary || "").slice(0, 300),
-    };
-
-    const { data: inserted, error: insErr } = await supabaseAdmin.from("roleplay_results").insert(row).select().single();
-    if (insErr) return res.status(500).json({ error: insErr.message });
-
-    return res.status(200).json({ saved: true, report: { ...row, id: inserted.id } });
-  } catch (e) {
-    return res.status(500).json({ error: `Scoring failed: ${e.message || e}` });
-  }
-}
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
