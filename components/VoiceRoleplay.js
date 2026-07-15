@@ -193,30 +193,46 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     try {
       const headers = await authHeader();
 
-      // 1) upload the recording (best-effort — scoring still proceeds if this fails)
-      let recordingPath = null;
+      // Kick off the recording upload and the AI scoring at the same time —
+      // the report doesn't need to wait for the (slower) upload to finish.
+      let uploadPromise = Promise.resolve(null);
       if (blob && blob.size > 0) {
-        const { data: { session } } = await supabase.auth.getSession();
-        const fileName = `${session.user.id}/${scenario.id}-${Date.now()}.webm`;
-        const { error: upErr } = await supabase.storage.from("call-recordings").upload(fileName, blob, {
-          contentType: "audio/webm", upsert: false,
-        });
-        if (!upErr) recordingPath = fileName;
-        else console.warn("Recording upload failed (report will still be generated):", upErr.message);
+        uploadPromise = (async () => {
+          const { data: { session } } = await supabase.auth.getSession();
+          const fileName = `${session.user.id}/${scenario.id}-${Date.now()}.webm`;
+          const { error: upErr } = await supabase.storage.from("call-recordings").upload(fileName, blob, {
+            contentType: "audio/webm", upsert: false,
+          });
+          if (upErr) { console.warn("Recording upload failed:", upErr.message); return null; }
+          return fileName;
+        })();
       }
 
-      // 2) score the call against the audit parameters
-      const res = await fetch("/api/score-roleplay", {
+      const scorePromise = fetch("/api/score-roleplay", {
         method: "POST", headers,
-        body: JSON.stringify({ scenarioId: scenario.id, transcript, recordingPath }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.saved) {
+        body: JSON.stringify({ scenarioId: scenario.id, transcript }),
+      }).then((r) => r.json().then((json) => ({ ok: r.ok, json })));
+
+      const [{ ok, json }, recordingPath] = await Promise.all([scorePromise, uploadPromise]);
+
+      if (!ok || !json.saved) {
         setError(json.error || "Could not generate the report. Please try again.");
         setScoring(false);
         return;
       }
-      if (json.saved) setReport(json.report);
+      setReport(json.report);
+      setScoring(false);
+
+      // attach the recording once it's uploaded (doesn't block the report from showing)
+      if (recordingPath && json.report?.id) {
+        fetch("/api/attach-recording", {
+          method: "POST", headers,
+          body: JSON.stringify({ resultId: json.report.id, recordingPath }),
+        }).then((r) => r.json()).then((j) => {
+          if (j.recording_url) setReport((prev) => prev && { ...prev, recording_url: j.recording_url });
+        }).catch(() => {});
+      }
+      return;
     } catch {}
     setScoring(false);
   };
@@ -233,7 +249,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         </div>
 
         {report ? (
-          <div className="scroll" style={{ maxHeight: "72vh", overflowY: "auto", paddingRight: 4 }}>
+          <div id="printable-report" className="scroll" style={{ maxHeight: "72vh", overflowY: "auto", paddingRight: 4 }}>
             <div className="grid2" style={{ marginBottom: 12 }}>
               <div className="tile"><div className="kpi-label">Overall Score</div><div className="kpi">{report.overall}/100</div></div>
               <div className="tile"><div className="kpi-label">Priority Action</div><div style={{ fontSize: 13 }}>{report.priority_action}</div></div>
@@ -293,11 +309,14 @@ export default function VoiceRoleplay({ scenario, onClose }) {
             )}
 
             {report.recording_url && (
-              <a href={report.recording_url} target="_blank" rel="noreferrer" className="btn outline full" style={{ marginTop: 8 }}>
+              <a href={report.recording_url} target="_blank" rel="noreferrer" className="btn outline full no-print" style={{ marginTop: 8 }}>
                 ⬇ Download call recording
               </a>
             )}
-            <button className="btn primary full" style={{ marginTop: 8 }} onClick={() => { cleanup(); onClose(); }}>Done</button>
+            <button className="btn dark full no-print" style={{ marginTop: 8 }} onClick={() => window.print()}>
+              ⬇ Download report as PDF
+            </button>
+            <button className="btn primary full no-print" style={{ marginTop: 8 }} onClick={() => { cleanup(); onClose(); }}>Done</button>
           </div>
         ) : (
           <div>

@@ -1,5 +1,6 @@
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
+import ThemeToggle from "./ThemeToggle";
 
 export default function Sidebar({ role, me }) {
   const router = useRouter();
@@ -11,6 +12,7 @@ export default function Sidebar({ role, me }) {
           ["/admin", "Overview"],
           ["/admin/courses", "Courses"],
           ["/admin/scenarios", "Roleplays"],
+          ["/admin/reports", "Call Reports"],
           ["/admin/employees", "Team"],
         ]
       : [
@@ -29,8 +31,11 @@ export default function Sidebar({ role, me }) {
 
   return (
     <aside className="sidebar">
-      <img src="/petpooja.png" alt="Petpooja" className="brand-logo" />
-      <div className="brand-sub"><b>PitchLab</b> · Sales Training</div>
+      <div className="row-between" style={{ padding: "0 5px" }}>
+        <img src="/petpooja.png" alt="Petpooja" className="brand-logo" />
+        <ThemeToggle />
+      </div>
+      <div className="brand-sub" style={{ padding: "0 5px" }}><b>PitchLab</b> · Sales Training</div>
 
       <nav className="nav">
         {links.map(([href, label]) => (

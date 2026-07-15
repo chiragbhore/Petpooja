@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
+import ThemeToggle from "../components/ThemeToggle";
 
 export default function Login() {
   const router = useRouter();
@@ -28,7 +29,8 @@ export default function Login() {
   };
 
   return (
-    <div className="center-screen">
+    <div className="center-screen" style={{ position: "relative" }}>
+      <div style={{ position: "absolute", top: 20, right: 20 }}><ThemeToggle /></div>
       <div className="card pad" style={{ width: 380 }}>
         <img src="/petpooja.png" alt="Petpooja" className="logo-lg" />
         <h1 className="page" style={{ fontSize: 22 }}>Sign in to PitchLab</h1>

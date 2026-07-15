@@ -1,8 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
-const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash";
-const TEXT_MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash-lite";
+const TEXT_MODEL_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
 const RECORDING_DAYS = 30;
 
 // Petpooja's audit parameters — the exact rubric every call is scored against.
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   const gate = await requireUser(req);
   if (gate.error) return res.status(gate.status).json({ error: gate.error });
 
-  const { scenarioId, transcript, recordingPath } = req.body || {};
+  const { scenarioId, transcript } = req.body || {};
   if (!transcript || transcript.length < 20) return res.status(400).json({ error: "Not enough conversation to score." });
 
   const { data: scenario } = await supabaseAdmin.from("scenarios").select("*").eq("id", scenarioId).single();
@@ -112,7 +112,6 @@ ${transcript}`;
       cleanParams[p] = { score: clamp(v.score), comment: String(v.comment || "").slice(0, 300) };
     });
 
-    const expiresAt = recordingPath ? new Date(Date.now() + RECORDING_DAYS * 86400000).toISOString() : null;
 
     const row = {
       user_id: gate.userId,
@@ -128,21 +127,13 @@ ${transcript}`;
       empathy_score: clamp(r.empathy_score),
       adaptability_score: clamp(r.adaptability_score),
       ei_feedback: String(r.ei_feedback || "").slice(0, 400),
-      recording_path: recordingPath || null,
-      recording_expires_at: expiresAt,
       verdict: String(r.executive_summary || "").slice(0, 300),
     };
 
     const { data: inserted, error: insErr } = await supabaseAdmin.from("roleplay_results").insert(row).select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });
 
-    let recording_url = null;
-    if (recordingPath) {
-      const { data: signed } = await supabaseAdmin.storage.from("call-recordings").createSignedUrl(recordingPath, 3600);
-      recording_url = signed?.signedUrl || null;
-    }
-
-    return res.status(200).json({ saved: true, report: { ...row, recording_url } });
+    return res.status(200).json({ saved: true, report: { ...row, id: inserted.id } });
   } catch (e) {
     return res.status(500).json({ error: `Scoring failed: ${e.message || e}` });
   }

@@ -69,8 +69,8 @@ export default function MyCalls() {
 
         {open && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }} onClick={() => setOpen(null)}>
-            <div className="card pad scroll" style={{ width: 620, maxWidth: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-              <div className="row-between" style={{ marginBottom: 10 }}>
+            <div className="card pad scroll" id="printable-report" style={{ width: 620, maxWidth: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+              <div className="row-between no-print" style={{ marginBottom: 10 }}>
                 <b>{scenarios[open.scenario_id] || "Scenario"}</b>
                 <span style={{ cursor: "pointer", color: "#9aa0aa" }} onClick={() => setOpen(null)}>✕</span>
               </div>
@@ -91,10 +91,11 @@ export default function MyCalls() {
                 ))}
               </div>
               {open.recording_url ? (
-                <a href={open.recording_url} target="_blank" rel="noreferrer" className="btn outline full" style={{ marginTop: 14 }}>⬇ Download call recording</a>
+                <a href={open.recording_url} target="_blank" rel="noreferrer" className="btn outline full no-print" style={{ marginTop: 14 }}>⬇ Download call recording</a>
               ) : (
-                <div className="mini" style={{ marginTop: 14 }}>Recording unavailable (older than 30 days, or none was captured).</div>
+                <div className="mini no-print" style={{ marginTop: 14 }}>Recording unavailable (older than 30 days, or none was captured).</div>
               )}
+              <button className="btn dark full no-print" style={{ marginTop: 8 }} onClick={() => window.print()}>⬇ Download report as PDF</button>
             </div>
           </div>
         )}
