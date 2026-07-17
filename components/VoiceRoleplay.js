@@ -208,7 +208,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         })();
       }
 
-      const scorePromise = fetch("/api/score-roleplay", {
+      const scorePromise = fetch("/api/score-roleplay-v4", {
         method: "POST", headers,
         body: JSON.stringify({ scenarioId: scenario.id, transcript }),
       }).then((r) => r.json().then((json) => ({ ok: r.ok, json })));
@@ -233,7 +233,10 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         }).catch(() => {});
       }
       return;
-    } catch {}
+    } catch (e) {
+      console.error("Roleplay scoring/upload failed:", e);
+      setError("Something went wrong generating the report: " + (e && e.message ? e.message : "unknown error"));
+    }
     setScoring(false);
   };
 
