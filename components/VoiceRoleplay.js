@@ -208,7 +208,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         })();
       }
 
-      const scorePromise = fetch("/api/score-roleplay-v5", {
+      const scorePromise = fetch("/api/score-roleplay-v6", {
         method: "POST", headers,
         body: JSON.stringify({ scenarioId: scenario.id, transcript }),
       }).then((r) => r.json().then((json) => ({ ok: r.ok, json })));
