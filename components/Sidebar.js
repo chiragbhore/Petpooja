@@ -13,6 +13,7 @@ export default function Sidebar({ role, me }) {
           ["/admin/courses", "Courses"],
           ["/admin/scenarios", "Roleplays"],
           ["/admin/reports", "Call Reports"],
+          ["/admin/classroom", "Classroom"],
           ["/admin/employees", "Team"],
         ]
       : [
@@ -20,6 +21,7 @@ export default function Sidebar({ role, me }) {
           ["/employee/courses", "Courses"],
           ["/employee/roleplay", "Roleplay"],
           ["/employee/my-calls", "My Calls"],
+          ["/employee/classroom", "Classroom"],
         ];
 
   const isActive = (href) => path === href || (href !== "/admin" && href !== "/employee" && path.startsWith(href));
