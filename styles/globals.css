@@ -176,6 +176,7 @@ input:focus, select:focus { border-color: var(--red); background: var(--card); }
 .diff-Easy { background: #e8f6ee; color: #15803d; }
 .diff-Medium { background: #fef4e6; color: #b45309; }
 .diff-Hard { background: #fdeaec; color: var(--red-dark); }
+.diff-Expert { background: #efe6fb; color: #6d28d9; }
 
 .btn.outline { background: #fff; color: #4b5563; border: 1px solid var(--line); }
 .btn.outline:hover { background: #f6f7f8; }
@@ -207,6 +208,7 @@ input:focus, select:focus { border-color: var(--red); background: var(--card); }
 [data-theme="dark"] .diff-Easy { background: #1c3a2a; color: #6ee0a4; }
 [data-theme="dark"] .diff-Medium { background: #3a2f1c; color: #f0b862; }
 [data-theme="dark"] .diff-Hard { background: #3a2426; color: #ff9a99; }
+[data-theme="dark"] .diff-Expert { background: #2e2148; color: #c4a6ff; }
 [data-theme="dark"] .table th { color: #9a9ba0; }
 [data-theme="dark"] .table td { border-bottom-color: #26272b; }
 [data-theme="dark"] .lesson { border-bottom-color: #26272b; }
