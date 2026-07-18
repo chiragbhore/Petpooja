@@ -18,7 +18,7 @@ export default function ClassroomRoom({ roomName, displayName, onClose }) {
         width: "100%",
         height: "100%",
         userInfo: { displayName: displayName || "Trainee" },
-        configOverwrite: { prejoinPageEnabled: true, disableDeepLinking: true },
+        configOverwrite: { prejoinPageEnabled: false, disableDeepLinking: true },
         interfaceConfigOverwrite: { SHOW_JITSI_WATERMARK: false, SHOW_WATERMARK_FOR_GUESTS: false },
       });
       apiRef.current = api;
