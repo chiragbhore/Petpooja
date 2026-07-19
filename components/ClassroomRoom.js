@@ -1,14 +1,47 @@
-export default function ClassroomRoom({ roomUrl, onClose }) {
-  if (!roomUrl) {
-    return (
-      <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 100, display: "grid", placeItems: "center" }}>
-        <div style={{ color: "#fff", textAlign: "center" }}>
-          <p>This session doesn't have a video room yet.</p>
-          <button className="btn danger" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    );
-  }
+import { useEffect, useRef } from "react";
+
+// Embeds a free Jitsi Meet video room. No account needed for participants —
+// only the very first person into a brand-new room (the host/admin) may be
+// asked to sign in with Google/GitHub once, as Jitsi's free-tier spam guard.
+export default function ClassroomRoom({ roomName, displayName, onClose }) {
+  const containerRef = useRef(null);
+  const apiRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = () => {
+      if (cancelled) return;
+      if (!window.JitsiMeetExternalAPI) return;
+      const api = new window.JitsiMeetExternalAPI("meet.jit.si", {
+        roomName: "pitchlab-" + roomName,
+        parentNode: containerRef.current,
+        width: "100%",
+        height: "100%",
+        userInfo: { displayName: displayName || "Trainee" },
+        configOverwrite: { prejoinPageEnabled: false, disableDeepLinking: true },
+        interfaceConfigOverwrite: { SHOW_JITSI_WATERMARK: false, SHOW_WATERMARK_FOR_GUESTS: false },
+      });
+      apiRef.current = api;
+      api.addEventListener("readyToClose", () => { if (onClose) onClose(); });
+    };
+
+    if (window.JitsiMeetExternalAPI) {
+      load();
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://meet.jit.si/external_api.js";
+      script.async = true;
+      script.onload = load;
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      cancelled = true;
+      if (apiRef.current) { try { apiRef.current.dispose(); } catch {} }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomName]);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 100, display: "flex", flexDirection: "column" }}>
@@ -16,12 +49,7 @@ export default function ClassroomRoom({ roomUrl, onClose }) {
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>Live classroom</span>
         <button className="btn danger" onClick={onClose}>Leave</button>
       </div>
-      <iframe
-        src={roomUrl}
-        allow="camera; microphone; fullscreen; display-capture; autoplay"
-        style={{ flex: 1, border: "none", width: "100%" }}
-        title="Live classroom"
-      />
+      <div ref={containerRef} style={{ flex: 1 }} />
     </div>
   );
 }
