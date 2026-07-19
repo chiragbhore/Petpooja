@@ -55,7 +55,7 @@ export default function EmployeeClassroom() {
           </div>
         )}
 
-        {inRoom && <ClassroomRoom roomUrl={inRoom.room_url} onClose={() => setInRoom(null)} />}
+        {inRoom && <ClassroomRoom roomName={inRoom.room_name} displayName={me.full_name} onClose={() => setInRoom(null)} />}
       </main>
     </div>
   );
