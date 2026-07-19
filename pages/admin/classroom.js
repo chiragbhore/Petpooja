@@ -4,18 +4,20 @@ import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 import ClassroomRoom from "../../components/ClassroomRoom";
 
+function slugify(text) {
+  return (text || "session")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 40) + "-" + Date.now().toString(36);
+}
+
 export default function AdminClassroom() {
   const { loading, me } = useProfile("admin");
   const [sessions, setSessions] = useState([]);
   const [form, setForm] = useState({ title: "", description: "", scheduled_at: "", duration_minutes: 45 });
   const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
   const [inRoom, setInRoom] = useState(null);
-
-  const authHeader = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    return { Authorization: "Bearer " + session?.access_token, "Content-Type": "application/json" };
-  };
 
   const load = async () => {
     const { data } = await supabase.from("live_sessions").select("*").order("scheduled_at", { ascending: true });
@@ -27,38 +29,18 @@ export default function AdminClassroom() {
     e.preventDefault();
     setMsg(null);
     if (!form.title.trim() || !form.scheduled_at) { setMsg("Title and date/time are required."); return; }
-    setBusy(true);
-    try {
-      const res = await fetch("/api/create-classroom-room", {
-        method: "POST",
-        headers: await authHeader(),
-        body: JSON.stringify({
-          title: form.title,
-          scheduledAt: new Date(form.scheduled_at).toISOString(),
-          durationMinutes: form.duration_minutes,
-        }),
-      });
-      const roomData = await res.json();
-      if (!res.ok) { setMsg(roomData.error || "Could not create the video room."); setBusy(false); return; }
-
-      const { error } = await supabase.from("live_sessions").insert({
-        title: form.title,
-        description: form.description,
-        scheduled_at: new Date(form.scheduled_at).toISOString(),
-        duration_minutes: Number(form.duration_minutes) || 45,
-        room_name: roomData.name,
-        room_url: roomData.url,
-        host_name: me.full_name,
-        created_by: me.id,
-      });
-      if (error) { setMsg(error.message); setBusy(false); return; }
-
-      setForm({ title: "", description: "", scheduled_at: "", duration_minutes: 45 });
-      load();
-    } catch (e) {
-      setMsg("Could not create session: " + (e.message || e));
-    }
-    setBusy(false);
+    const { error } = await supabase.from("live_sessions").insert({
+      title: form.title,
+      description: form.description,
+      scheduled_at: new Date(form.scheduled_at).toISOString(),
+      duration_minutes: Number(form.duration_minutes) || 45,
+      room_name: slugify(form.title),
+      host_name: me.full_name,
+      created_by: me.id,
+    });
+    if (error) { setMsg(error.message); return; }
+    setForm({ title: "", description: "", scheduled_at: "", duration_minutes: 45 });
+    load();
   };
 
   const del = async (id) => { if (confirm("Cancel this session?")) { await supabase.from("live_sessions").delete().eq("id", id); load(); } };
@@ -71,7 +53,7 @@ export default function AdminClassroom() {
       <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Live classroom</h1>
-        <p className="sub">Schedule live video training sessions for your team. No sign-in required to join.</p>
+        <p className="sub">Schedule live video training sessions. You may be asked to sign in once when starting each session — employees never are.</p>
         {msg && <div className="msg err">{msg}</div>}
 
         <div className="card pad" style={{ marginBottom: 22 }}>
@@ -83,7 +65,7 @@ export default function AdminClassroom() {
               <label className="field"><span>Duration (minutes)</span><input type="number" value={form.duration_minutes} onChange={set("duration_minutes")} /></label>
             </div>
             <label className="field"><span>Description</span><input value={form.description} onChange={set("description")} placeholder="What this session covers" /></label>
-            <button className="btn primary" disabled={busy}>{busy ? "Creating room…" : "Schedule session"}</button>
+            <button className="btn primary">Schedule session</button>
           </form>
         </div>
 
@@ -107,7 +89,7 @@ export default function AdminClassroom() {
           </table>
         </div>
 
-        {inRoom && <ClassroomRoom roomUrl={inRoom.room_url} onClose={() => setInRoom(null)} />}
+        {inRoom && <ClassroomRoom roomName={inRoom.room_name} displayName={me.full_name} onClose={() => setInRoom(null)} />}
       </main>
     </div>
   );
