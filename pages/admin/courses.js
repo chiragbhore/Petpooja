@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
+import { uploadScormPackage } from "../../lib/scorm";
 import Sidebar from "../../components/Sidebar";
 
 export default function AdminCourses() {
@@ -10,6 +11,10 @@ export default function AdminCourses() {
   const [form, setForm] = useState({ title: "", tag: "Core", description: "" });
   const [lessonInput, setLessonInput] = useState({}); // courseId -> text
   const [msg, setMsg] = useState(null);
+  const [scormBusy, setScormBusy] = useState(null); // lessonId currently uploading
+  const [scormProgress, setScormProgress] = useState("");
+  const fileInputRef = useRef(null);
+  const pendingLessonId = useRef(null);
 
   const load = async () => {
     const { data: cs } = await supabase.from("courses").select("*").order("sort_order", { ascending: true });
@@ -51,6 +56,40 @@ export default function AdminCourses() {
 
   const delLesson = async (id) => { await supabase.from("lessons").delete().eq("id", id); load(); };
 
+  const openScormPicker = (lessonId) => {
+    pendingLessonId.current = lessonId;
+    if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  const onScormFileChosen = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // allow picking the same file again later
+    const lessonId = pendingLessonId.current;
+    if (!file || !lessonId) return;
+    if (!file.name.toLowerCase().endsWith(".zip")) { setMsg("Please choose a .zip SCORM package."); return; }
+
+    setMsg(null);
+    setScormBusy(lessonId);
+    setScormProgress("Unpacking…");
+    try {
+      const url = await uploadScormPackage(file, lessonId, (done, total) => {
+        setScormProgress(`Uploading ${done}/${total} files…`);
+      });
+      const { error } = await supabase.from("lessons").update({ content_type: "scorm", scorm_url: url }).eq("id", lessonId);
+      if (error) throw new Error(error.message);
+      load();
+    } catch (err) {
+      setMsg("SCORM upload failed: " + (err.message || err));
+    }
+    setScormBusy(null);
+    setScormProgress("");
+  };
+
+  const removeScorm = async (lessonId) => {
+    await supabase.from("lessons").update({ content_type: "standard", scorm_url: null }).eq("id", lessonId);
+    load();
+  };
+
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
   return (
@@ -58,8 +97,10 @@ export default function AdminCourses() {
       <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Courses</h1>
-        <p className="sub">Create courses and add lessons to them.</p>
+        <p className="sub">Create courses, add lessons, and attach SCORM packages where useful.</p>
         {msg && <div className="msg err">{msg}</div>}
+
+        <input ref={fileInputRef} type="file" accept=".zip" style={{ display: "none" }} onChange={onScormFileChosen} />
 
         <div className="card pad" style={{ marginBottom: 22 }}>
           <div style={{ fontWeight: 700, marginBottom: 14 }}>New course</div>
@@ -87,9 +128,22 @@ export default function AdminCourses() {
             </div>
             <div style={{ marginTop: 12 }}>
               {(lessonsByCourse[c.id] || []).map((l, i) => (
-                <div key={l.id} className="lesson" style={{ padding: "10px 0" }}>
+                <div key={l.id} className="lesson" style={{ padding: "10px 0", flexWrap: "wrap" }}>
                   <div className="num">{i + 1}</div>
-                  <div className="ltitle">{l.title}</div>
+                  <div className="ltitle">
+                    {l.title}
+                    {l.content_type === "scorm" && <span className="pill red" style={{ marginLeft: 8 }}>SCORM</span>}
+                  </div>
+                  {scormBusy === l.id ? (
+                    <span className="mini">{scormProgress}</span>
+                  ) : l.content_type === "scorm" ? (
+                    <>
+                      <button className="btn outline" onClick={() => openScormPicker(l.id)}>Replace SCORM</button>
+                      <button className="btn ghost" onClick={() => removeScorm(l.id)}>Remove SCORM</button>
+                    </>
+                  ) : (
+                    <button className="btn outline" onClick={() => openScormPicker(l.id)}>+ Add SCORM package</button>
+                  )}
                   <button className="btn ghost" onClick={() => delLesson(l.id)}>Remove</button>
                 </div>
               ))}
