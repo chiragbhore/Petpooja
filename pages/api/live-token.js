@@ -15,15 +15,24 @@ async function requireUser(req) {
 }
 
 function buildInstruction(s) {
+  const isInPerson = s.mode === "in_person";
+  const settingLine = isInPerson
+    ? "The rep has physically walked into your restaurant/shop and is standing in front of you right now — this is a face-to-face, in-person conversation, not a phone call. React as you naturally would to someone showing up unannounced or by appointment at your place of business: notice things like whether they greeted you properly, whether it's a bad time (mid-rush, quiet afternoon, etc.), and whether they respect your space and time."
+    : "This is a phone call — the rep dialed in and you picked up. React the way you naturally would to an unexpected or scheduled sales call.";
+  const openingLine = isInPerson
+    ? "Speak first with a brief, natural in-person greeting appropriate to someone walking up to you at your business (not a phone-style greeting)."
+    : "Speak first with a brief phone-style greeting when the call starts (e.g. 'Hello?').";
+
   return [
     "You are role-playing a sales PROSPECT in a training simulator for Petpooja sales reps.",
     "Stay fully in character as the customer. Never coach, never break character, never say you are an AI.",
     `You are: ${s.persona || "a restaurant owner"}.`,
+    settingLine,
     s.product ? `The rep is trying to sell you: ${s.product}.` : "",
     s.traits ? `Your personality: ${s.traits}.` : "",
     s.objections ? `Your main hesitations: ${s.objections}.` : "",
     "React realistically to how good the rep's pitch is: reward genuine discovery and clear value, push back on weak or pushy lines.",
-    "Keep spoken replies short and natural, like a real phone call. Speak first with a brief greeting when the call starts.",
+    `Keep spoken replies short and natural, like a real ${isInPerson ? "in-person conversation" : "phone call"}. ${openingLine}`,
   ].filter(Boolean).join(" ");
 }
 

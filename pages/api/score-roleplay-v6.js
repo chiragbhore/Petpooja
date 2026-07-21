@@ -44,7 +44,8 @@ export default async function handler(req, res) {
 
   var scenarioLine = "";
   if (scenario) {
-    scenarioLine = "Scenario: " + scenario.title + ". The rep's goal was: " + scenario.goal + ". Prospect persona: " + scenario.persona + ".";
+    var settingWord = scenario.mode === "in_person" ? "in-person visit" : "phone call";
+    scenarioLine = "Scenario: " + scenario.title + " (an " + settingWord + "). The rep's goal was: " + scenario.goal + ". Prospect persona: " + scenario.persona + ".";
   }
   var previousLine = "This is the rep's first scored call - there is no previous call to compare.";
   if (previous) {
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
   promptParts.push("You are a senior sales trainer auditing a roleplay call for a restaurant-POS sales team.");
   promptParts.push(scenarioLine);
   promptParts.push(previousLine);
-  promptParts.push("Score the call strictly against these 7 audit parameters, each 0-100: " + PARAMETERS.join(", ") + ".");
+  promptParts.push("Score the conversation strictly against these 7 audit parameters, each 0-100: " + PARAMETERS.join(", ") + ".");
   promptParts.push("Be honest and specific - do not inflate scores. If the rep responded incoherently, off-topic, or in the wrong language for the context, scores should be very low and say so plainly.");
   promptParts.push("Respond with ONLY a JSON object, no markdown, no code fences, matching exactly this shape (values are placeholders showing type/format, replace them with real content):");
   promptParts.push(JSON.stringify(schemaExample));
