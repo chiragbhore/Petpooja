@@ -3,13 +3,22 @@ import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
-const blank = { title: "", difficulty: "Medium", persona: "", product: "", traits: "", objections: "", goal: "" };
+const CATEGORIES = ["Cold Call", "Discovery", "Objection Handling", "Closing", "Upsell", "General"];
+const DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert"];
+const MODES = [
+  { value: "call", label: "Phone Call" },
+  { value: "in_person", label: "In-Person Visit" },
+];
+const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", persona: "", product: "", traits: "", objections: "", goal: "" };
 
 export default function AdminScenarios() {
   const { loading, me } = useProfile("admin");
   const [scenarios, setScenarios] = useState([]);
   const [form, setForm] = useState(blank);
   const [msg, setMsg] = useState(null);
+  const [filterCat, setFilterCat] = useState("all");
+  const [filterDiff, setFilterDiff] = useState("all");
+  const [filterMode, setFilterMode] = useState("all");
 
   const load = async () => {
     const { data } = await supabase.from("scenarios").select("*").order("created_at", { ascending: true });
@@ -29,6 +38,14 @@ export default function AdminScenarios() {
   const del = async (id) => { if (confirm("Delete this scenario?")) { await supabase.from("scenarios").delete().eq("id", id); load(); } };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  const modeLabel = (m) => (MODES.find((x) => x.value === m) || MODES[0]).label;
+
+  const visible = scenarios.filter((s) =>
+    (filterCat === "all" || s.category === filterCat) &&
+    (filterDiff === "all" || s.difficulty === filterDiff) &&
+    (filterMode === "all" || (s.mode || "call") === filterMode)
+  );
+
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
   return (
@@ -36,7 +53,7 @@ export default function AdminScenarios() {
       <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Roleplay scenarios</h1>
-        <p className="sub">Design the prospects your team practices against.</p>
+        <p className="sub">Design the prospects your team practices against — over the phone or a face-to-face visit.</p>
         {msg && <div className="msg err">{msg}</div>}
 
         <div className="card pad" style={{ marginBottom: 22 }}>
@@ -44,8 +61,18 @@ export default function AdminScenarios() {
           <form onSubmit={add}>
             <div className="grid2">
               <label className="field"><span>Title</span><input value={form.title} onChange={set("title")} required /></label>
+              <label className="field"><span>Mode</span>
+                <select value={form.mode} onChange={set("mode")}>
+                  {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select></label>
               <label className="field"><span>Difficulty</span>
-                <select value={form.difficulty} onChange={set("difficulty")}><option>Easy</option><option>Medium</option><option>Hard</option></select></label>
+                <select value={form.difficulty} onChange={set("difficulty")}>
+                  {DIFFICULTIES.map((d) => <option key={d}>{d}</option>)}
+                </select></label>
+              <label className="field"><span>Category (sales skill)</span>
+                <select value={form.category} onChange={set("category")}>
+                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select></label>
               <label className="field"><span>Prospect persona</span><input value={form.persona} onChange={set("persona")} placeholder="Vikram, owner of a 30-seat cafe" /></label>
               <label className="field"><span>Product being sold</span><input value={form.product} onChange={set("product")} placeholder="an all-in-one POS system" /></label>
               <label className="field"><span>Personality traits</span><input value={form.traits} onChange={set("traits")} placeholder="friendly but time-poor" /></label>
@@ -56,18 +83,44 @@ export default function AdminScenarios() {
           </form>
         </div>
 
+        <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <label className="field" style={{ marginBottom: 0, minWidth: 180 }}>
+            <span>Filter by mode</span>
+            <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)}>
+              <option value="all">All modes</option>
+              {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </label>
+          <label className="field" style={{ marginBottom: 0, minWidth: 180 }}>
+            <span>Filter by category</span>
+            <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
+              <option value="all">All categories</option>
+              {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </label>
+          <label className="field" style={{ marginBottom: 0, minWidth: 180 }}>
+            <span>Filter by difficulty</span>
+            <select value={filterDiff} onChange={(e) => setFilterDiff(e.target.value)}>
+              <option value="all">All difficulties</option>
+              {DIFFICULTIES.map((d) => <option key={d}>{d}</option>)}
+            </select>
+          </label>
+        </div>
+
         <div className="grid3">
-          {scenarios.map((s) => (
+          {visible.map((s) => (
             <div key={s.id} className="tile">
               <div className="row-between">
                 <b>{s.title}</b>
                 <span className={`pill diff-${s.difficulty}`}>{s.difficulty}</span>
               </div>
+              <div className="mini" style={{ marginTop: 4 }}>{s.category || "General"} · {modeLabel(s.mode)}</div>
               <div className="course-desc" style={{ marginTop: 8 }}>{s.persona}</div>
               {s.goal && <div className="mini" style={{ marginTop: 8 }}>🎯 {s.goal}</div>}
               <button className="btn danger" style={{ marginTop: 12 }} onClick={() => del(s.id)}>Delete</button>
             </div>
           ))}
+          {visible.length === 0 && <div className="mini">No scenarios match this filter.</div>}
         </div>
       </main>
     </div>
