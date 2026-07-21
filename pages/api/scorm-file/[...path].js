@@ -7,8 +7,9 @@ function guessContentType(filename) {
     js: "application/javascript", css: "text/css",
     json: "application/json", xml: "application/xml",
     png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml",
-    mp3: "audio/mpeg", mp4: "video/mp4",
-    woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf",
+    mp3: "audio/mpeg", mp4: "video/mp4", webm: "video/webm", ogg: "video/ogg",
+    ogv: "video/ogg", mov: "video/quicktime", m4v: "video/x-m4v", wav: "audio/wav",
+    woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
   };
   return map[ext] || "application/octet-stream";
 }
@@ -26,7 +27,33 @@ export default async function handler(req, res) {
   if (error || !data) return res.status(404).send("File not found.");
 
   const buffer = Buffer.from(await data.arrayBuffer());
-  res.setHeader("Content-Type", guessContentType(path));
+  const contentType = guessContentType(path);
+  const total = buffer.length;
+
+  // Video/audio elements request a byte range and expect a 206 partial
+  // response — without this, browsers refuse to play the media at all,
+  // even though the file itself uploaded and is being found correctly.
+  const range = req.headers.range;
+  if (range) {
+    const match = /bytes=(\d*)-(\d*)/.exec(range);
+    let start = match && match[1] ? parseInt(match[1], 10) : 0;
+    let end = match && match[2] ? parseInt(match[2], 10) : total - 1;
+    if (isNaN(start) || start < 0) start = 0;
+    if (isNaN(end) || end >= total) end = total - 1;
+    if (start > end) { start = 0; end = total - 1; }
+
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Length", end - start + 1);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return res.end(buffer.slice(start, end + 1));
+  }
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Length", total);
   res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
   res.status(200).send(buffer);
 }
