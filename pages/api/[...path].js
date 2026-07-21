@@ -1,0 +1,32 @@
+import { supabaseAdmin } from "../../../lib/supabaseAdmin";
+
+function guessContentType(filename) {
+  const ext = (filename.split(".").pop() || "").toLowerCase();
+  const map = {
+    html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
+    js: "application/javascript", css: "text/css",
+    json: "application/json", xml: "application/xml",
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml",
+    mp3: "audio/mpeg", mp4: "video/mp4",
+    woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+// Serves a file straight out of the scorm-content bucket, but sets the
+// Content-Type ourselves based on the file extension — this sidesteps
+// whatever content-type Supabase Storage actually stored, which turned
+// out to be unreliable for this bucket.
+export default async function handler(req, res) {
+  const parts = req.query.path;
+  if (!parts || parts.length === 0) return res.status(400).send("Missing path.");
+  const path = parts.join("/");
+
+  const { data, error } = await supabaseAdmin.storage.from("scorm-content").download(path);
+  if (error || !data) return res.status(404).send("File not found.");
+
+  const buffer = Buffer.from(await data.arrayBuffer());
+  res.setHeader("Content-Type", guessContentType(path));
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.status(200).send(buffer);
+}
