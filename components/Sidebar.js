@@ -13,6 +13,7 @@ export default function Sidebar({ role, me }) {
           ["/admin/courses", "Courses"],
           ["/admin/scenarios", "Roleplays"],
           ["/admin/quizzes", "Assessments"],
+          ["/admin/knowledge", "Knowledge Base"],
           ["/admin/reports", "Call Reports"],
           ["/admin/classroom", "Classroom"],
           ["/admin/employees", "Team"],

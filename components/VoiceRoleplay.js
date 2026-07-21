@@ -170,6 +170,8 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     }
   };
 
+  const pendingBlobRef = useRef(null);
+
   const end = async () => {
     // grab the recorder's final chunk before we tear everything down
     let blob = null;
@@ -179,15 +181,31 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         try { recorderRef.current.stop(); } catch { resolve(null); }
       });
     }
+    pendingBlobRef.current = blob;
 
     cleanup();
-    setState("ended");
     setSpeaking(false);
     if (curInRef.current.trim()) transcriptRef.current.push({ role: "REP", text: curInRef.current.trim() });
     if (curOutRef.current.trim()) transcriptRef.current.push({ role: "PROSPECT", text: curOutRef.current.trim() });
 
     const transcript = transcriptRef.current.map((t) => `${t.role}: ${t.text}`).join("\n");
-    if (transcript.length < 20) return; // nothing to score
+    if (transcript.length < 20) { setState("ended"); return; } // nothing to score, nothing to ask about
+
+    // Pause here and let the rep decide whether this attempt is worth
+    // scoring — a bad take shouldn't have to become a permanent record.
+    setState("confirming");
+  };
+
+  const skipReport = () => {
+    pendingBlobRef.current = null;
+    transcriptRef.current = [];
+    setState("skipped");
+  };
+
+  const generateReport = async () => {
+    const blob = pendingBlobRef.current;
+    setState("ended");
+    const transcript = transcriptRef.current.map((t) => `${t.role}: ${t.text}`).join("\n");
 
     setScoring(true);
     try {
@@ -329,17 +347,28 @@ export default function VoiceRoleplay({ scenario, onClose }) {
                 {state === "idle" && "Ready to practice"}
                 {state === "connecting" && "Connecting the call…"}
                 {state === "live" && (speaking ? "Prospect is speaking…" : "Your turn — speak naturally")}
+                {state === "confirming" && "Call ended"}
                 {state === "ended" && (scoring ? "Scoring your call…" : "Call ended")}
+                {state === "skipped" && "Report skipped"}
                 {state === "error" && "Couldn't connect"}
               </div>
               {state === "live" && <p className="mini" style={{ marginTop: 6 }}>Talk into your mic like a real sales call. Click End when you're done.</p>}
+              {state === "confirming" && <p className="mini" style={{ marginTop: 6 }}>Do you want an AI report generated for this attempt? If it wasn't a fair run, you can skip it — nothing will be saved.</p>}
+              {state === "skipped" && <p className="mini" style={{ marginTop: 6 }}>This attempt wasn't saved or scored.</p>}
               {error && <p className="mini" style={{ marginTop: 8, color: "var(--red-dark)" }}>{error}</p>}
             </div>
 
             <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
               {(state === "idle" || state === "error") && <button className="btn primary full" onClick={start}>Start call</button>}
               {(state === "connecting" || state === "live") && <button className="btn danger full" onClick={end}>End call</button>}
+              {state === "confirming" && (
+                <>
+                  <button className="btn outline full" onClick={skipReport}>Skip — don't generate</button>
+                  <button className="btn primary full" onClick={generateReport}>Generate report</button>
+                </>
+              )}
               {state === "ended" && !scoring && <button className="btn outline full" onClick={() => { cleanup(); onClose(); }}>Close</button>}
+              {state === "skipped" && <button className="btn outline full" onClick={() => { cleanup(); onClose(); }}>Close</button>}
             </div>
 
             <div className="mini" style={{ marginTop: 14 }}>
