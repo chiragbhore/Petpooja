@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { useProfile, hasPermission } from "../../lib/useProfile";
+import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
 export default function AdminKnowledge() {
-  const { loading, me } = useProfile(["admin", "trainer"]);
+  const { loading, me } = useProfile("admin");
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState({ name: "", key_facts: "" });
   const [msg, setMsg] = useState(null);
@@ -30,13 +30,10 @@ export default function AdminKnowledge() {
   const del = async (id) => { if (confirm("Remove this product from the knowledge base?")) { await supabase.from("product_knowledge").delete().eq("id", id); load(); } };
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
-  if (me.role === "trainer" && !hasPermission(me, "knowledge")) {
-    return <div className="center-screen"><div className="mini">You don't have access to this section — ask your admin to grant it.</div></div>;
-  }
 
   return (
     <div className="shell">
-      <Sidebar role={me.role} me={me} />
+      <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Product knowledge base</h1>
         <p className="sub">

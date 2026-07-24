@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useProfile, hasPermission } from "../../lib/useProfile";
+import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
@@ -12,7 +12,7 @@ const MODES = [
 const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", persona: "", product: "", traits: "", objections: "", goal: "" };
 
 export default function AdminScenarios() {
-  const { loading, me } = useProfile(["admin", "trainer"]);
+  const { loading, me } = useProfile("admin");
   const [scenarios, setScenarios] = useState([]);
   const [form, setForm] = useState(blank);
   const [msg, setMsg] = useState(null);
@@ -47,13 +47,10 @@ export default function AdminScenarios() {
   );
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
-  if (me.role === "trainer" && !hasPermission(me, "scenarios")) {
-    return <div className="center-screen"><div className="mini">You don't have access to this section — ask your admin to grant it.</div></div>;
-  }
 
   return (
     <div className="shell">
-      <Sidebar role={me.role} me={me} />
+      <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Roleplay scenarios</h1>
         <p className="sub">Design the prospects your team practices against — over the phone or a face-to-face visit.</p>

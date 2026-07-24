@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { useProfile, hasPermission } from "../../lib/useProfile";
+import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
 const blankQ = { question: "", options: ["", "", "", ""], correct_index: 0 };
 
 export default function AdminQuizzes() {
-  const { loading, me } = useProfile(["admin", "trainer"]);
+  const { loading, me } = useProfile("admin");
   const [courses, setCourses] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [questionsByQuiz, setQuestionsByQuiz] = useState({});
@@ -63,13 +63,10 @@ export default function AdminQuizzes() {
   const courseName = (id) => courses.find((c) => c.id === id)?.title || "—";
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
-  if (me.role === "trainer" && !hasPermission(me, "quizzes")) {
-    return <div className="center-screen"><div className="mini">You don't have access to this section — ask your admin to grant it.</div></div>;
-  }
 
   return (
     <div className="shell">
-      <Sidebar role={me.role} me={me} />
+      <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Assessments</h1>
         <p className="sub">Build quizzes to check real understanding after a course.</p>

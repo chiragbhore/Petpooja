@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useProfile, hasPermission } from "../../lib/useProfile";
+import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 import ClassroomRoom from "../../components/ClassroomRoom";
@@ -13,7 +13,7 @@ function slugify(text) {
 }
 
 export default function AdminClassroom() {
-  const { loading, me } = useProfile(["admin", "trainer"]);
+  const { loading, me } = useProfile("admin");
   const [sessions, setSessions] = useState([]);
   const [form, setForm] = useState({ title: "", description: "", scheduled_at: "", duration_minutes: 45 });
   const [msg, setMsg] = useState(null);
@@ -47,13 +47,10 @@ export default function AdminClassroom() {
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
-  if (me.role === "trainer" && !hasPermission(me, "classroom")) {
-    return <div className="center-screen"><div className="mini">You don't have access to this section — ask your admin to grant it.</div></div>;
-  }
 
   return (
     <div className="shell">
-      <Sidebar role={me.role} me={me} />
+      <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Live classroom</h1>
         <p className="sub">Schedule live video training sessions. You may be asked to sign in once when starting each session — employees never are.</p>

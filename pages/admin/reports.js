@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { useProfile, hasPermission } from "../../lib/useProfile";
+import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
 export default function AdminReports() {
-  const { loading, me } = useProfile(["admin", "trainer"]);
+  const { loading, me } = useProfile("admin");
   const [calls, setCalls] = useState([]);
   const [employees, setEmployees] = useState({});
   const [scenarios, setScenarios] = useState({});
@@ -40,13 +40,10 @@ export default function AdminReports() {
   const avg = visible.length ? Math.round(visible.reduce((a, c) => a + (c.overall || 0), 0) / visible.length) : 0;
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
-  if (me.role === "trainer" && !hasPermission(me, "reports")) {
-    return <div className="center-screen"><div className="mini">You don't have access to this section — ask your admin to grant it.</div></div>;
-  }
 
   return (
     <div className="shell">
-      <Sidebar role={me.role} me={me} />
+      <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Call reports</h1>
         <p className="sub">Every roleplay call across your team, with the full AI pitch report.</p>
