@@ -28,12 +28,12 @@ export default async function handler(req, res) {
   const gate = await requireAdmin(req);
   if (gate.error) return res.status(gate.status).json({ error: gate.error });
 
-  // LIST — employees and trainers (Team management is admin-only anyway)
+  // LIST
   if (req.method === "GET") {
     const { data, error } = await supabaseAdmin
       .from("profiles")
-      .select("id, full_name, email, team, role, permissions, created_at")
-      .in("role", ["employee", "trainer"])
+      .select("id, full_name, email, team, created_at")
+      .eq("role", "employee")
       .order("created_at", { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ employees: data });
@@ -41,11 +41,10 @@ export default async function handler(req, res) {
 
   // CREATE
   if (req.method === "POST") {
-    const { full_name, email, team, password, role } = req.body || {};
+    const { full_name, email, team, password } = req.body || {};
     if (!full_name || !email || !password) {
       return res.status(400).json({ error: "Name, email and password are required." });
     }
-    const finalRole = role === "trainer" ? "trainer" : "employee";
     // 1) create the auth login (auto-confirmed so they can sign in immediately)
     const { data: created, error: cErr } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -60,7 +59,7 @@ export default async function handler(req, res) {
       full_name,
       email,
       team: team || null,
-      role: finalRole,
+      role: "employee",
     });
     if (pErr) {
       // roll back the auth user if the profile failed
