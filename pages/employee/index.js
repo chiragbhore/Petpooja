@@ -76,7 +76,7 @@ export default function EmployeeHome() {
                   <PolarGrid stroke="var(--line)" />
                   <PolarAngleAxis dataKey="skill" tick={{ fontSize: 10, fill: "var(--muted)" }} />
                   <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "var(--muted)" }} />
-                  <Radar dataKey="you" stroke="#d42b3a" fill="#d42b3a" fillOpacity={0.35} />
+                  <Radar dataKey="you" stroke="#6d4aff" fill="#6d4aff" fillOpacity={0.35} />
                   <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 8, fontSize: 12 }} />
                 </RadarChart>
               </ResponsiveContainer>
@@ -93,7 +93,7 @@ export default function EmployeeHome() {
                   <XAxis dataKey="call" tick={{ fontSize: 10, fill: "var(--muted)" }} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--muted)" }} />
                   <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 8, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="score" stroke="#d42b3a" strokeWidth={2.5} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="score" stroke="#6d4aff" strokeWidth={2.5} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             ) : <div className="mini" style={{ padding: 24 }}>Complete a couple of roleplay calls to see your trend.</div>}
