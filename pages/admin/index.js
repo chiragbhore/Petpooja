@@ -118,7 +118,7 @@ export default function AdminHome() {
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted)" }} interval={0} angle={-20} textAnchor="end" height={50} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--muted)" }} />
                   <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 8, fontSize: 12 }} />
-                  <Bar dataKey="score" fill="#d42b3a" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="score" fill="#6d4aff" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <div className="mini" style={{ padding: 24 }}>No scored calls yet.</div>}
@@ -151,7 +151,7 @@ export default function AdminHome() {
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: "var(--muted)" }} />
                 <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "var(--muted)" }} />
                 <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 8, fontSize: 12 }} />
-                <Line type="monotone" dataKey="avg" stroke="#d42b3a" strokeWidth={2.5} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="avg" stroke="#6d4aff" strokeWidth={2.5} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           ) : <div className="mini" style={{ padding: 24 }}>Not enough calls yet to show a trend — needs at least 2 different days of activity.</div>}
