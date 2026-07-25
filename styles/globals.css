@@ -315,8 +315,8 @@ p.sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
   mask-image: radial-gradient(70% 70% at 50% 40%, #000 40%, transparent 100%);
 }
 .auth-logo { display: flex; align-items: center; gap: 12px; position: relative; z-index: 1; }
-.auth-logo img { width: 40px; height: 40px; object-fit: contain; background: #fff; border-radius: 11px; padding: 5px; }
-.auth-logo span { font-weight: 800; font-size: 19px; letter-spacing: -.02em; }
+.auth-logo img { height: 52px; width: auto; object-fit: contain; background: #fff; border-radius: 12px; padding: 8px 14px; }
+.auth-logo span { font-weight: 800; font-size: 20px; letter-spacing: -.02em; color: #fff; }
 .auth-brand-mid { position: relative; z-index: 1; max-width: 460px; }
 .auth-headline { font-size: 40px; line-height: 1.08; font-weight: 800; letter-spacing: -.03em; color: #fff; margin: 12px 0 16px; }
 .auth-lede { font-size: 15.5px; line-height: 1.6; color: rgba(255,255,255,.82); margin: 0; }
