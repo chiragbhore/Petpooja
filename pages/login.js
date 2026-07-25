@@ -29,16 +29,44 @@ export default function Login() {
   };
 
   return (
-    <div className="center-screen" style={{ position: "relative" }}>
-      <div style={{ position: "absolute", top: 20, right: 20 }}><ThemeToggle /></div>
-      <div className="card pad" style={{ width: 380 }}>
-        <img src="/petpooja.png" alt="Petpooja" className="logo-lg" />
-        <h1 className="page" style={{ fontSize: 22 }}>Sign in to PitchLab</h1>
-        <p className="sub" style={{ marginBottom: 20 }}>Petpooja Sales Training portal</p>
+    <div className="auth">
+      <aside className="auth-brand">
+        <div className="auth-logo">
+          <img src="/petpooja.png" alt="Petpooja" />
+          <span>PitchLab</span>
+        </div>
 
-        {err && <div className="msg err">{err}</div>}
+        <div className="auth-brand-mid">
+          <p className="eyebrow" style={{ color: "rgba(255,255,255,.7)" }}>Sales training portal</p>
+          <h1 className="auth-headline">Practice the pitch.<br />Close the restaurant.</h1>
+          <p className="auth-lede">
+            Live AI voice roleplay, instant scored feedback, and coaching on every objection —
+            so your first real call isn't your first practice.
+          </p>
 
-        <form onSubmit={submit}>
+          <div className="wave" aria-hidden="true">
+            {Array.from({ length: 40 }).map((_, i) => (
+              <span key={i} style={{ animationDelay: `${(i % 10) * 0.08}s` }} />
+            ))}
+          </div>
+
+          <div className="auth-chips">
+            <div className="auth-chip"><b>7</b><span>audit parameters</span></div>
+            <div className="auth-chip"><b>Live</b><span>AI voice calls</span></div>
+            <div className="auth-chip"><b>Instant</b><span>pitch reports</span></div>
+          </div>
+        </div>
+
+        <p className="auth-brand-foot">Petpooja · Restaurant POS · Sales enablement</p>
+      </aside>
+
+      <main className="auth-form-wrap">
+        <form className="auth-card" onSubmit={submit}>
+          <h2 className="auth-title">Sign in to PitchLab</h2>
+          <p className="sub" style={{ marginBottom: 24 }}>Welcome back — let's get practicing.</p>
+
+          {err && <div className="auth-err">{err}</div>}
+
           <label className="field">
             <span>Email</span>
             <input
@@ -59,15 +87,15 @@ export default function Login() {
               required
             />
           </label>
-          <button className="btn primary full" disabled={busy} style={{ marginTop: 6 }}>
+          <button className="btn block" disabled={busy} style={{ marginTop: 6, padding: "12px 18px" }}>
             {busy ? "Signing in…" : "Sign in"}
           </button>
-        </form>
 
-        <p className="mini" style={{ marginTop: 16, textAlign: "center" }}>
-          No account? Ask your admin to create one for you.
-        </p>
-      </div>
+          <p className="auth-help">No account? Ask your admin to create one for you.</p>
+        </form>
+      </main>
+
+      <div className="theme-fab"><ThemeToggle /></div>
     </div>
   );
 }
