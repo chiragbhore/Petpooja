@@ -2,6 +2,14 @@ import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 import ThemeToggle from "./ThemeToggle";
 
+const ICONS = {
+  Overview: "🏠", Dashboard: "🏠",
+  Courses: "📚", Roleplay: "🎤", "Roleplays": "🎯",
+  Assessments: "📝", "Knowledge Base": "🧠",
+  "Call Reports": "📈", "My Calls": "🎧",
+  Classroom: "📅", Team: "👥",
+};
+
 export default function Sidebar({ role, me }) {
   const router = useRouter();
   const path = router.pathname;
@@ -35,39 +43,39 @@ export default function Sidebar({ role, me }) {
 
   return (
     <aside className="sidebar">
-      <div className="row-between" style={{ padding: "0 5px" }}>
-        <img src="/petpooja.png" alt="Petpooja" className="brand-logo" />
-        <ThemeToggle />
+      <div className="sb-brand">
+        <img src="/petpooja.png" alt="Petpooja" style={{ width: 38, height: 38, objectFit: "contain", background: "#fff", borderRadius: 10, padding: 4 }} />
+        <div className="sb-brand-name">PitchLab<span>Sales Pitch Practice</span></div>
       </div>
-      <div className="brand-sub" style={{ padding: "0 5px" }}><b>PitchLab</b> · Sales Training</div>
 
-      <nav className="nav">
+      <nav className="sb-nav">
         {links.map(([href, label]) => (
           <a
             key={href}
-            href={href}
-            className={isActive(href) ? "active" : ""}
-            onClick={(e) => { e.preventDefault(); router.push(href); }}
+            className={`sb-link ${isActive(href) ? "active" : ""}`}
+            onClick={() => router.push(href)}
           >
-            {label}
+            <span>{ICONS[label] || "•"}</span> {label}
           </a>
         ))}
       </nav>
 
       <div className="spacer" />
 
-      <div className="row-between" style={{ padding: "8px 6px" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-          <div className="avatar">
-            {(me?.full_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-          </div>
-          <div className="stack" style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{me?.full_name}</div>
-            <div className="mini" style={{ textTransform: "capitalize" }}>{role}</div>
-          </div>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
+        <ThemeToggle />
+      </div>
+
+      <div className="sb-user">
+        <div className="avatar">
+          {(me?.full_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me?.full_name}</div>
+          <div className="mini" style={{ textTransform: "capitalize" }}>{role}</div>
         </div>
       </div>
-      <button className="btn ghost full" onClick={logout} style={{ marginTop: 6 }}>Log out</button>
+      <button className="btn ghost full" onClick={logout} style={{ marginTop: 8 }}>Log out</button>
     </aside>
   );
 }
