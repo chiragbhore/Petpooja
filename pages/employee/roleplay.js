@@ -9,6 +9,7 @@ const DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert"];
 const MODES = [
   { value: "call", label: "Phone Call", icon: "📞" },
   { value: "in_person", label: "In-Person Visit", icon: "🚪" },
+  { value: "demo", label: "Full Product Demo", icon: "🖥️" },
 ];
 
 export default function Roleplay() {
@@ -40,7 +41,7 @@ export default function Roleplay() {
       <Sidebar role="employee" me={me} />
       <main className="content">
         <h1 className="page">Roleplay practice</h1>
-        <p className="sub">Practice a live sales conversation — by phone or a face-to-face visit. You'll be scored at the end.</p>
+        <p className="sub">Practice a live sales conversation — by phone, a face-to-face visit, or a full product demo. You'll be scored at the end.</p>
 
         {scenarios.length === 0 ? (
           <div className="card pad mini">No roleplay scenarios yet. Your admin will add some soon.</div>
