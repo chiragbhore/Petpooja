@@ -10,7 +10,25 @@ const MODES = [
   { value: "in_person", label: "In-Person Visit" },
   { value: "demo", label: "Full Product Demo" },
 ];
-const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", persona: "", product: "", traits: "", objections: "", goal: "" };
+const VOICES = [
+  { group: "Female", options: [
+    { value: "Kore", label: "Kore - Firm, professional" },
+    { value: "Aoede", label: "Aoede - Breezy, easygoing" },
+    { value: "Leda", label: "Leda - Youthful, friendly" },
+    { value: "Zephyr", label: "Zephyr - Bright, energetic" },
+    { value: "Autonoe", label: "Autonoe - Bright, upbeat" },
+    { value: "Despina", label: "Despina - Smooth, calm" },
+  ]},
+  { group: "Male", options: [
+    { value: "Puck", label: "Puck - Upbeat, conversational" },
+    { value: "Charon", label: "Charon - Deep, authoritative" },
+    { value: "Fenrir", label: "Fenrir - Warm, excitable" },
+    { value: "Orus", label: "Orus - Firm, direct" },
+    { value: "Iapetus", label: "Iapetus - Clear, measured" },
+    { value: "Algieba", label: "Algieba - Smooth, relaxed" },
+  ]},
+];
+const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "" };
 
 export default function AdminScenarios() {
   const { loading, me } = useProfile("admin");
@@ -40,6 +58,10 @@ export default function AdminScenarios() {
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const modeLabel = (m) => (MODES.find((x) => x.value === m) || MODES[0]).label;
+  const voiceLabel = (v) => {
+    for (const g of VOICES) { const found = g.options.find((o) => o.value === v); if (found) return found.value + " (" + g.group + ")"; }
+    return v || "Kore";
+  };
 
   const visible = scenarios.filter((s) =>
     (filterCat === "all" || s.category === filterCat) &&
@@ -65,6 +87,14 @@ export default function AdminScenarios() {
               <label className="field"><span>Mode</span>
                 <select value={form.mode} onChange={set("mode")}>
                   {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select></label>
+              <label className="field"><span>AI voice / character</span>
+                <select value={form.voice} onChange={set("voice")}>
+                  {VOICES.map((g) => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </optgroup>
+                  ))}
                 </select></label>
               <label className="field"><span>Difficulty</span>
                 <select value={form.difficulty} onChange={set("difficulty")}>
@@ -113,9 +143,10 @@ export default function AdminScenarios() {
             <div key={s.id} className="tile">
               <div className="row-between">
                 <b>{s.title}</b>
-                <span className={`pill diff-${s.difficulty}`}>{s.difficulty}</span>
+                <span className={"pill diff-" + s.difficulty}>{s.difficulty}</span>
               </div>
               <div className="mini" style={{ marginTop: 4 }}>{s.category || "General"} · {modeLabel(s.mode)}</div>
+              <div className="mini">🎙️ {voiceLabel(s.voice)}</div>
               <div className="course-desc" style={{ marginTop: 8 }}>{s.persona}</div>
               {s.goal && <div className="mini" style={{ marginTop: 8 }}>🎯 {s.goal}</div>}
               <button className="btn danger" style={{ marginTop: 12 }} onClick={() => del(s.id)}>Delete</button>
