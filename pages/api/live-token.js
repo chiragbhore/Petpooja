@@ -4,32 +4,39 @@ import { supabaseAdmin } from "../../lib/supabaseAdmin";
 const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview";
 const VOICE = process.env.GEMINI_VOICE || "Kore";
 
-// Confirm the caller is a signed-in user.
-async function requireUser(req) {
-  const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!token) return { error: "Not signed in.", status: 401 };
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user) return { error: "Session invalid.", status: 401 };
-  return { userId: data.user.id };
-}
-
 function buildInstruction(s, products) {
-  const isInPerson = s.mode === "in_person";
-  const settingLine = isInPerson
-    ? "The rep has physically walked into your restaurant/shop and is standing in front of you right now — this is a face-to-face, in-person conversation, not a phone call. React as you naturally would to someone showing up unannounced or by appointment at your place of business: notice things like whether they greeted you properly, whether it's a bad time (mid-rush, quiet afternoon, etc.), and whether they respect your space and time."
-    : "This is a phone call — the rep dialed in and you picked up. React the way you naturally would to an unexpected or scheduled sales call.";
-  const openingLine = isInPerson
-    ? "Speak first with a brief, natural in-person greeting appropriate to someone walking up to you at your business (not a phone-style greeting)."
-    : "Speak first with a brief phone-style greeting when the call starts (e.g. 'Hello?').";
+  const mode = s.mode || "call";
+  const isInPerson = mode === "in_person";
+  const isDemo = mode === "demo";
+
+  let settingLine;
+  let openingLine;
+  if (isDemo) {
+    settingLine =
+      "This is a FULL PRODUCT DEMO session — the rep has set up a proper walkthrough (in person or over a video call sharing their screen) to show you the entire product end to end, not just a quick pitch. You expect them to actually walk you through real features, not just talk in generalities. Act like a genuinely curious buyer sitting through a demo: ask to see or hear about specific things, ask what happens in edge cases relevant to your restaurant, and expect the rep to cover breadth, not just one headline feature. If the rep tries to wrap up quickly without covering much ground, push back and ask what else the product does.";
+    openingLine =
+      "Speak first with a natural opener appropriate to starting a scheduled demo session (e.g. confirming you're ready to see the product, or asking them to get started) — not a phone greeting.";
+  } else if (isInPerson) {
+    settingLine =
+      "The rep has physically walked into your restaurant/shop and is standing in front of you right now — this is a face-to-face, in-person conversation, not a phone call. React as you naturally would to someone showing up unannounced or by appointment at your place of business: notice things like whether they greeted you properly, whether it's a bad time (mid-rush, quiet afternoon, etc.), and whether they respect your space and time.";
+    openingLine =
+      "Speak first with a brief, natural in-person greeting appropriate to someone walking up to you at your business (not a phone-style greeting).";
+  } else {
+    settingLine =
+      "This is a phone call — the rep dialed in and you picked up. React the way you naturally would to an unexpected or scheduled sales call.";
+    openingLine =
+      "Speak first with a brief phone-style greeting when the call starts (e.g. 'Hello?').";
+  }
 
   let knowledgeBlock = "";
   if (products && products.length > 0) {
     const listed = products.map((p) => `— ${p.name}: ${p.key_facts}`).join("\n");
+    const demoDepth = isDemo
+      ? " Because this is a full demo (not a quick call), be noticeably more thorough: actively ask the rep to cover each product you have knowledge of if they haven't already, and probe deeper follow-up questions on each one — a real buyer sitting through a scheduled demo expects comprehensive coverage, not a surface-level pass."
+      : " If more than one product exists in your knowledge above, try to naturally bring at least 2 different products into the conversation over the course of the call so the rep is tested across more than one area, not just whichever one they lead with.";
     knowledgeBlock =
       "PRODUCT KNOWLEDGE YOU HAVE RESEARCHED BEFOREHAND (use this to test the rep, don't just recite it):\n" + listed + "\n" +
-      "Whenever the rep mentions any feature, benefit, or claim about a product, ask a genuine follow-up or counter-question that checks whether they actually know it well — don't just accept whatever they say at face value. If the rep is vague, incorrect, or dodges, push back politely but skeptically, the way a real informed buyer would. " +
-      "If more than one product exists in your knowledge above, try to naturally bring at least 2 different products into the conversation over the course of the call so the rep is tested across more than one area, not just whichever one they lead with.";
+      "Whenever the rep mentions any feature, benefit, or claim about a product, ask a genuine follow-up or counter-question that checks whether they actually know it well — don't just accept whatever they say at face value. If the rep is vague, incorrect, or dodges, push back politely but skeptically, the way a real informed buyer would." + demoDepth;
   }
 
   const pricingRule =
@@ -46,7 +53,7 @@ function buildInstruction(s, products) {
     knowledgeBlock,
     pricingRule,
     "React realistically to how good the rep's pitch is: reward genuine discovery and clear value, push back on weak or pushy lines.",
-    `Keep spoken replies short and natural, like a real ${isInPerson ? "in-person conversation" : "phone call"}. ${openingLine}`,
+    `Keep spoken replies short and natural, like a real ${isDemo ? "product demo session" : isInPerson ? "in-person conversation" : "phone call"}. ${openingLine}`,
   ].filter(Boolean).join(" ");
 }
 
@@ -54,8 +61,11 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: "Server not configured: missing GEMINI_API_KEY." });
 
-  const gate = await requireUser(req);
-  if (gate.error) return res.status(gate.status).json({ error: gate.error });
+  const auth = req.headers.authorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "Not signed in." });
+  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  if (userErr || !userData?.user) return res.status(401).json({ error: "Session invalid." });
 
   const { scenarioId } = req.body || {};
   if (!scenarioId) return res.status(400).json({ error: "Missing scenarioId." });
@@ -69,7 +79,7 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: "v1alpha" } });
     const expireTime = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min cap
 
-    const token = await ai.authTokens.create({
+    const authToken = await ai.authTokens.create({
       config: {
         uses: 1,
         expireTime,
@@ -87,7 +97,7 @@ export default async function handler(req, res) {
       },
     });
 
-    return res.status(200).json({ token: token.name, model: LIVE_MODEL });
+    return res.status(200).json({ token: authToken.name, model: LIVE_MODEL });
   } catch (e) {
     return res.status(500).json({ error: `Could not start the practice line: ${e.message || e}` });
   }

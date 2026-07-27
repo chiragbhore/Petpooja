@@ -44,8 +44,8 @@ export default async function handler(req, res) {
 
   var scenarioLine = "";
   if (scenario) {
-    var settingWord = scenario.mode === "in_person" ? "in-person visit" : "phone call";
-    scenarioLine = "Scenario: " + scenario.title + " (an " + settingWord + "). The rep's goal was: " + scenario.goal + ". Prospect persona: " + scenario.persona + ".";
+    var settingWord = scenario.mode === "in_person" ? "in-person visit" : scenario.mode === "demo" ? "full product demo session" : "phone call";
+    scenarioLine = "Scenario: " + scenario.title + " (a " + settingWord + "). The rep's goal was: " + scenario.goal + ". Prospect persona: " + scenario.persona + ".";
   }
   var previousLine = "This is the rep's first scored call - there is no previous call to compare.";
   if (previous) {
@@ -72,10 +72,11 @@ export default async function handler(req, res) {
   });
 
   var promptParts = [];
-  promptParts.push("You are a senior sales trainer auditing a roleplay call for a restaurant-POS sales team.");
+  promptParts.push("You are a senior sales trainer auditing a roleplay conversation for a restaurant-POS sales team.");
   promptParts.push(scenarioLine);
   promptParts.push(previousLine);
   promptParts.push("Score the conversation strictly against these 7 audit parameters, each 0-100: " + PARAMETERS.join(", ") + ".");
+  promptParts.push("If this was a full product demo session, weigh Product Knowledge and breadth of feature coverage heavily — a good demo should cover multiple product areas, not just one.");
   promptParts.push("Be honest and specific - do not inflate scores. If the rep responded incoherently, off-topic, or in the wrong language for the context, scores should be very low and say so plainly.");
   promptParts.push("Respond with ONLY a JSON object, no markdown, no code fences, matching exactly this shape (values are placeholders showing type/format, replace them with real content):");
   promptParts.push(JSON.stringify(schemaExample));
@@ -117,20 +118,13 @@ export default async function handler(req, res) {
     try {
       r = JSON.parse(text);
     } catch (parseErr) {
-      // Salvage attempt: some responses include stray text before/after the JSON,
-      // or get cut off mid-way. Try extracting just the outermost {...} block.
       var start = text.indexOf("{");
       var end = text.lastIndexOf("}");
       if (start !== -1 && end !== -1 && end > start) {
-        try {
-          r = JSON.parse(text.slice(start, end + 1));
-        } catch (secondErr) {
-          var snippet = text.slice(0, 300);
-          return res.status(200).json({ saved: false, error: "Could not parse the report. Raw start: " + snippet });
-        }
+        try { r = JSON.parse(text.slice(start, end + 1)); }
+        catch (secondErr) { return res.status(200).json({ saved: false, error: "Could not parse the report. Raw start: " + text.slice(0, 300) }); }
       } else {
-        var snippet2 = text.slice(0, 300);
-        return res.status(200).json({ saved: false, error: "Could not parse the report. Raw start: " + snippet2 });
+        return res.status(200).json({ saved: false, error: "Could not parse the report. Raw start: " + text.slice(0, 300) });
       }
     }
 
