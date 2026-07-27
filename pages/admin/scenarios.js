@@ -8,6 +8,7 @@ const DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert"];
 const MODES = [
   { value: "call", label: "Phone Call" },
   { value: "in_person", label: "In-Person Visit" },
+  { value: "demo", label: "Full Product Demo" },
 ];
 const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", persona: "", product: "", traits: "", objections: "", goal: "" };
 
@@ -53,7 +54,7 @@ export default function AdminScenarios() {
       <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Roleplay scenarios</h1>
-        <p className="sub">Design the prospects your team practices against — over the phone or a face-to-face visit.</p>
+        <p className="sub">Design the prospects your team practices against — over the phone, a face-to-face visit, or a full product demo.</p>
         {msg && <div className="msg err">{msg}</div>}
 
         <div className="card pad" style={{ marginBottom: 22 }}>
