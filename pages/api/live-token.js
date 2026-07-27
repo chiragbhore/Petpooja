@@ -12,7 +12,7 @@ function buildInstruction(s, products) {
   let settingLine;
   if (isDemo) {
     settingLine =
-      "A rep has arrived (in person, or on a video call sharing their screen) for what you understand is some kind of meeting, but you have not yet been told exactly why they're there or what they want to show you. Do NOT assume a demo has already started or jump into asking about specific features. Simply greet them naturally and let THEM explain the purpose of the visit first. Only once they've actually introduced themselves and stated what they're there to show you should you engage as a curious buyer who expects real depth and specific features, not vague overviews.";
+      "A rep has arrived (in person, or on a video call sharing their screen) for what you understand is some kind of meeting, but you have not yet been told exactly why they're there or what they want to show you. Do NOT assume a demo has already started or jump into asking about specific features. Simply greet them naturally and let THEM explain the purpose of the visit first. Only once they've actually introduced themselves and stated what they're there to show you should you engage as a curious buyer who expects real depth, not vague overviews.";
   } else if (isInPerson) {
     settingLine =
       "The rep has physically walked into your restaurant/shop and is standing in front of you right now. You do not know yet why they're here. React the way a real business owner would to someone showing up at their place of business — greet them, and let THEM explain why they've come before you react to anything about a product or pitch. Stay aware of timing (are you mid-rush, or free to talk), and whether they're being respectful of your time.";
@@ -25,11 +25,13 @@ function buildInstruction(s, products) {
   if (products && products.length > 0) {
     const listed = products.map((p) => `— ${p.name}: ${p.key_facts}`).join("\n");
     const demoDepth = isDemo
-      ? " Because this is a scheduled full demo, once it's actually underway, expect and naturally ask for real breadth — if the rep only covers one thing, it's reasonable for you to ask what else the product does."
+      ? " Because this is a scheduled full demo, once it's actually underway, it's natural for you to ask what else the product does if the rep only covers one thing narrowly."
       : " If more than one product is listed above, let your natural curiosity lead you to ask about more than one over the course of the conversation, not just whichever one the rep leads with.";
     knowledgeBlock =
-      "Background knowledge you personally already have about this space (use it to inform how discerning a buyer you are — do not recite it back or read it out loud):\n" + listed + "\n" +
-      "Once the conversation is actually underway and the rep makes a claim about a product or feature, respond the way a genuinely informed buyer would — ask a real follow-up question that tests whether they actually know what they're talking about, and push back politely if something sounds vague or off." + demoDepth;
+      "You privately know the following about this product space — this is YOUR background knowledge as a buyer, used only to judge how well-informed the rep is. " +
+      "You must NEVER reveal, recite, hint at, confirm, or correct with any of these specific facts yourself, in any form — you are testing the rep's knowledge, not teaching or feeding it to them:\n" + listed + "\n" +
+      "When the rep makes a claim about a product or feature, ask ONE natural, genuine follow-up question that would reveal whether they actually know what they're talking about — for example asking how something works in a specific situation, or what happens if a certain condition applies. " +
+      "If their answer is vague, incorrect, or they dodge, react the way a real skeptical buyer would (mild doubt, asking them to clarify, or simply seeming unconvinced) — but do not tell them the correct answer, do not explain what they got wrong, and do not supply the information yourself under any circumstance. Ask at most one such question at a time, and let the conversation breathe naturally between questions rather than interrogating them line after line." + demoDepth;
   }
 
   const pricingRule =
