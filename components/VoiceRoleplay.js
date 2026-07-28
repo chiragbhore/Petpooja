@@ -21,6 +21,11 @@ function bytesFromBase64(b64) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
+function formatDuration(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
 
 export default function VoiceRoleplay({ scenario, onClose }) {
   const [state, setState] = useState("idle"); // idle | connecting | live | ended | error
@@ -28,6 +33,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const [speaking, setSpeaking] = useState(false);
   const [report, setReport] = useState(null);
   const [scoring, setScoring] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // seconds since the call started
 
   const sessionRef = useRef(null);
   const inCtxRef = useRef(null);
@@ -48,6 +54,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const reconnectAttemptsRef = useRef(0);
   const intentionallyClosedRef = useRef(false);
   const keepAliveRef = useRef(null);
+  const timerRef = useRef(null);
   const lastAudioInRef = useRef(0); // timestamp of last audio chunk we actually sent
 
   const authHeader = async () => {
@@ -58,6 +65,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const cleanup = () => {
     intentionallyClosedRef.current = true;
     if (keepAliveRef.current) { clearInterval(keepAliveRef.current); keepAliveRef.current = null; }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     try { procRef.current && procRef.current.disconnect(); } catch {}
     try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
     try { inCtxRef.current && inCtxRef.current.state !== "closed" && inCtxRef.current.close(); } catch {}
@@ -92,10 +100,32 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   // Gemini. Kept separate from mic/recording setup so we can silently
   // reconnect mid-call without disturbing the user's mic stream or the
   // in-progress recording.
+  // Called the moment Google warns us the connection is about to end
+  // (a "GoAway" notice, typically ~50s ahead of time). Swapping over here,
+  // ahead of the forced disconnect, avoids the few seconds of dead audio
+  // that happen if we just wait for the connection to actually die first.
+  const proactiveReconnect = () => {
+    if (reconnectingRef.current) return; // already mid-reconnect, don't double up
+    reconnectingRef.current = true;
+    const oldSession = sessionRef.current;
+    connectGemini()
+      .then((s) => {
+        sessionRef.current = s;
+        reconnectingRef.current = false;
+        console.log("[PitchLab] Proactive reconnect succeeded — swapped to fresh connection.");
+        try { oldSession && oldSession.close(); } catch {}
+      })
+      .catch((err) => {
+        console.log("[PitchLab] Proactive reconnect FAILED:", err?.message || err);
+        reconnectingRef.current = false;
+      });
+  };
+
   const connectGemini = async () => {
     console.log("[PitchLab] connectGemini() called - attempt #" + reconnectAttemptsRef.current + ", resumeHandle:", resumeHandleRef.current);
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: tokenRef.current, httpOptions: { apiVersion: "v1alpha" } });
+    let mySession = null; // set once connect() resolves below
 
     const session = await ai.live.connect({
       model: modelRef.current,
@@ -120,10 +150,12 @@ export default function VoiceRoleplay({ scenario, onClose }) {
             console.log("[PitchLab] Got a new resumption handle.");
           }
           if (msg.goAway) {
-            console.log("[PitchLab] Gemini sent a GoAway notice - timeLeft:", msg.goAway.timeLeft);
+            console.log("[PitchLab] Gemini sent a GoAway notice - timeLeft:", msg.goAway.timeLeft, "- proactively reconnecting now.");
+            proactiveReconnect();
           }
         },
         onerror: (e) => {
+          if (sessionRef.current && sessionRef.current !== mySession) return; // stale, already replaced
           console.log("[PitchLab] Gemini onerror fired:", e?.message || e);
           if (intentionallyClosedRef.current) return;
           setError(e?.message || "Connection error. The free voice line may be busy - try again in a moment.");
@@ -131,8 +163,13 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           cleanup();
         },
         onclose: (ev) => {
+          if (sessionRef.current && sessionRef.current !== mySession) {
+            console.log("[PitchLab] Ignoring close of a superseded (already replaced) connection.");
+            return;
+          }
           console.log("[PitchLab] Gemini onclose fired. intentionallyClosed:", intentionallyClosedRef.current, "event:", ev);
           if (intentionallyClosedRef.current) return;
+          if (reconnectingRef.current) return; // a reconnect (e.g. from GoAway) is already underway
           if (reconnectAttemptsRef.current >= 5) {
             console.log("[PitchLab] Giving up after 5 reconnect attempts.");
             setError("Lost the connection and couldn't reconnect. Please end the call and start a new one.");
@@ -163,6 +200,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         sessionResumption: resumeHandleRef.current ? { handle: resumeHandleRef.current } : {},
       },
     });
+    mySession = session;
     return session;
   };
 
@@ -172,6 +210,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     intentionallyClosedRef.current = false;
     reconnectAttemptsRef.current = 0;
     resumeHandleRef.current = null;
+    setElapsed(0);
     try {
       // 1) get a short-lived token from our server
       const res = await fetch("/api/live-token", {
@@ -250,6 +289,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         }
       }, 15000);
 
+      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
       setState("live");
     } catch (e) {
       setError(e.message || "Could not start the call.");
@@ -331,7 +371,14 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       <div className="card pad" style={{ width: report ? 620 : 460, maxWidth: "100%" }} onClick={(e) => e.stopPropagation()}>
         <div className="row-between" style={{ marginBottom: 12 }}>
           <b>{scenario.title}</b>
-          <span style={{ cursor: "pointer", color: "#9aa0aa" }} onClick={() => { cleanup(); onClose(); }}>✕</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {(state === "connecting" || state === "live") && (
+              <span className="pill red" style={{ fontVariantNumeric: "tabular-nums" }}>
+                ⏱ {formatDuration(elapsed)}
+              </span>
+            )}
+            <span style={{ cursor: "pointer", color: "#9aa0aa" }} onClick={() => { cleanup(); onClose(); }}>✕</span>
+          </div>
         </div>
 
         {report ? (
