@@ -47,6 +47,8 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const reconnectingRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const intentionallyClosedRef = useRef(false);
+  const keepAliveRef = useRef(null);
+  const lastAudioInRef = useRef(0); // timestamp of last audio chunk we actually sent
 
   const authHeader = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -55,6 +57,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
 
   const cleanup = () => {
     intentionallyClosedRef.current = true;
+    if (keepAliveRef.current) { clearInterval(keepAliveRef.current); keepAliveRef.current = null; }
     try { procRef.current && procRef.current.disconnect(); } catch {}
     try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
     try { inCtxRef.current && inCtxRef.current.state !== "closed" && inCtxRef.current.close(); } catch {}
@@ -90,13 +93,17 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   // reconnect mid-call without disturbing the user's mic stream or the
   // in-progress recording.
   const connectGemini = async () => {
+    console.log("[PitchLab] connectGemini() called - attempt #" + reconnectAttemptsRef.current + ", resumeHandle:", resumeHandleRef.current);
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: tokenRef.current, httpOptions: { apiVersion: "v1alpha" } });
 
     const session = await ai.live.connect({
       model: modelRef.current,
       callbacks: {
-        onopen: () => { reconnectAttemptsRef.current = 0; },
+        onopen: () => {
+          console.log("[PitchLab] Gemini connection OPENED.");
+          reconnectAttemptsRef.current = 0;
+        },
         onmessage: (msg) => {
           const audio = msg.data; // concatenated inline audio (base64) if present
           if (audio) playChunk(audio);
@@ -108,28 +115,26 @@ export default function VoiceRoleplay({ scenario, onClose }) {
             if (curOutRef.current.trim()) transcriptRef.current.push({ role: "PROSPECT", text: curOutRef.current.trim() });
             curInRef.current = ""; curOutRef.current = "";
           }
-          // Google periodically hands us a fresh resumption handle — keep
-          // the latest one so we can seamlessly reconnect if the
-          // connection drops (Google's WebSocket connections reset on
-          // their own roughly every 10 minutes, separate from actual
-          // conversation length).
           if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate?.newHandle) {
             resumeHandleRef.current = msg.sessionResumptionUpdate.newHandle;
+            console.log("[PitchLab] Got a new resumption handle.");
+          }
+          if (msg.goAway) {
+            console.log("[PitchLab] Gemini sent a GoAway notice - timeLeft:", msg.goAway.timeLeft);
           }
         },
         onerror: (e) => {
+          console.log("[PitchLab] Gemini onerror fired:", e?.message || e);
           if (intentionallyClosedRef.current) return;
-          setError(e?.message || "Connection error. The free voice line may be busy — try again in a moment.");
+          setError(e?.message || "Connection error. The free voice line may be busy - try again in a moment.");
           setState("error");
           cleanup();
         },
-        onclose: () => {
-          // If the user didn't end the call themselves, this was Google's
-          // own periodic connection reset — reconnect automatically using
-          // the resumption handle so the conversation continues without
-          // the trainee noticing anything happened.
+        onclose: (ev) => {
+          console.log("[PitchLab] Gemini onclose fired. intentionallyClosed:", intentionallyClosedRef.current, "event:", ev);
           if (intentionallyClosedRef.current) return;
           if (reconnectAttemptsRef.current >= 5) {
+            console.log("[PitchLab] Giving up after 5 reconnect attempts.");
             setError("Lost the connection and couldn't reconnect. Please end the call and start a new one.");
             setState("error");
             return;
@@ -137,8 +142,13 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           reconnectAttemptsRef.current += 1;
           reconnectingRef.current = true;
           connectGemini()
-            .then((s) => { sessionRef.current = s; reconnectingRef.current = false; })
-            .catch(() => {
+            .then((s) => {
+              sessionRef.current = s;
+              reconnectingRef.current = false;
+              console.log("[PitchLab] Reconnect succeeded.");
+            })
+            .catch((err) => {
+              console.log("[PitchLab] Reconnect FAILED:", err?.message || err);
               reconnectingRef.current = false;
               setError("Lost the connection and couldn't reconnect. Please end the call and start a new one.");
               setState("error");
@@ -149,15 +159,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         responseModalities: ["AUDIO"],
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        // Without this, Google's Live API hard-caps audio-only sessions at
-        // ~15 minutes and force-closes the connection. This setting tells
-        // Google to compress older parts of the conversation as it goes,
-        // which is their documented way to allow effectively unlimited
-        // session length instead of a fixed cutoff.
         contextWindowCompression: { slidingWindow: {} },
-        // Lets us reconnect (above, in onclose) and pick the conversation
-        // back up exactly where it left off, instead of Google's routine
-        // ~10-minute connection reset ending the call outright.
         sessionResumption: resumeHandleRef.current ? { handle: resumeHandleRef.current } : {},
       },
     });
@@ -190,7 +192,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       const session = await connectGemini();
       sessionRef.current = session;
 
-      // 3) capture microphone → stream PCM16 @ 16kHz
+      // 3) capture microphone -> stream PCM16 @ 16kHz
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const inCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
@@ -205,7 +207,10 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         const b64 = base64FromBytes(new Uint8Array(pcm.buffer));
         try {
           sessionRef.current.sendRealtimeInput({ audio: { data: b64, mimeType: "audio/pcm;rate=16000" } });
-        } catch {}
+          lastAudioInRef.current = Date.now();
+        } catch (sendErr) {
+          console.log("[PitchLab] sendRealtimeInput threw:", sendErr?.message || sendErr);
+        }
       };
       source.connect(proc);
       proc.connect(inCtx.destination);
@@ -225,6 +230,25 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         recorder.start(1000);
         recorderRef.current = recorder;
       } catch {}
+
+      // Some browsers quietly "suspend" audio contexts on long-running tabs
+      // to save power - this can silently stop mic capture and playback
+      // with zero errors, looking exactly like a dead call. This checks
+      // every 15s and forces both audio contexts back to running, and logs
+      // if the mic ever goes more than 5s without sending a chunk.
+      keepAliveRef.current = setInterval(() => {
+        if (inCtxRef.current && inCtxRef.current.state !== "running") {
+          console.log("[PitchLab] Input AudioContext was", inCtxRef.current.state, "- resuming it.");
+          inCtxRef.current.resume().catch(() => {});
+        }
+        if (outCtxRef.current && outCtxRef.current.state !== "running") {
+          console.log("[PitchLab] Output AudioContext was", outCtxRef.current.state, "- resuming it.");
+          outCtxRef.current.resume().catch(() => {});
+        }
+        if (lastAudioInRef.current && Date.now() - lastAudioInRef.current > 5000) {
+          console.log("[PitchLab] No mic audio sent in the last 5+ seconds - mic pipeline may have stalled.");
+        }
+      }, 15000);
 
       setState("live");
     } catch (e) {
@@ -257,8 +281,6 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     try {
       const headers = await authHeader();
 
-      // Kick off the recording upload and the AI scoring at the same time —
-      // the report doesn't need to wait for the (slower) upload to finish.
       let uploadPromise = Promise.resolve(null);
       if (blob && blob.size > 0) {
         uploadPromise = (async () => {
@@ -287,7 +309,6 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       setReport(json.report);
       setScoring(false);
 
-      // attach the recording once it's uploaded (doesn't block the report from showing)
       if (recordingPath && json.report?.id) {
         fetch("/api/attach-recording", {
           method: "POST", headers,
