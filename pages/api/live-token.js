@@ -87,11 +87,19 @@ export default async function handler(req, res) {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: "v1alpha" } });
     const expireTime = new Date(Date.now() + TOKEN_LIFETIME_MS).toISOString();
+    // Google's ephemeral tokens have a SECOND, separate expiry just for
+    // starting/reconnecting a live session — this was left unset before,
+    // so it silently defaulted to something very short, causing every
+    // automatic reconnect attempt to be rejected almost immediately with
+    // "new_session_expire_time deadline exceeded". Setting it explicitly
+    // to match our overall token lifetime fixes that.
+    const newSessionExpireTime = expireTime;
 
     const authToken = await ai.authTokens.create({
       config: {
         uses: 10,
         expireTime,
+        newSessionExpireTime,
         liveConnectConstraints: {
           model: LIVE_MODEL,
           config: {
