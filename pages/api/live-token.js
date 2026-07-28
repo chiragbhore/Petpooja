@@ -3,6 +3,11 @@ import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
 const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview";
 const DEFAULT_VOICE = process.env.GEMINI_VOICE || "Kore";
+// Security tokens always need SOME expiry — there's no way to request a
+// truly unlimited one. 4 hours is set here as a ceiling that should never
+// realistically be hit during a practice session, effectively removing
+// any practical time limit while keeping a sane technical safety net.
+const TOKEN_LIFETIME_MS = 4 * 60 * 60 * 1000;
 
 function buildInstruction(s, products) {
   const mode = s.mode || "call";
@@ -81,11 +86,11 @@ export default async function handler(req, res) {
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: "v1alpha" } });
-    const expireTime = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min cap
+    const expireTime = new Date(Date.now() + TOKEN_LIFETIME_MS).toISOString();
 
     const authToken = await ai.authTokens.create({
       config: {
-        uses: 1,
+        uses: 10,
         expireTime,
         liveConnectConstraints: {
           model: LIVE_MODEL,
