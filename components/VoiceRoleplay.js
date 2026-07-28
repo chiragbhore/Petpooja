@@ -41,6 +41,12 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const recorderRef = useRef(null);
   const recChunksRef = useRef([]);
   const recDestRef = useRef(null); // MediaStreamDestination mixing mic + prospect audio
+  const tokenRef = useRef(null);
+  const modelRef = useRef(null);
+  const resumeHandleRef = useRef(null);
+  const reconnectingRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const intentionallyClosedRef = useRef(false);
 
   const authHeader = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -48,6 +54,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   };
 
   const cleanup = () => {
+    intentionallyClosedRef.current = true;
     try { procRef.current && procRef.current.disconnect(); } catch {}
     try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
     try { inCtxRef.current && inCtxRef.current.state !== "closed" && inCtxRef.current.close(); } catch {}
@@ -78,9 +85,91 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     src.onended = () => { if (nextPlayRef.current <= ctx.currentTime + 0.05) setSpeaking(false); };
   };
 
+  // Opens (or re-opens, via session resumption) the live connection to
+  // Gemini. Kept separate from mic/recording setup so we can silently
+  // reconnect mid-call without disturbing the user's mic stream or the
+  // in-progress recording.
+  const connectGemini = async () => {
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: tokenRef.current, httpOptions: { apiVersion: "v1alpha" } });
+
+    const session = await ai.live.connect({
+      model: modelRef.current,
+      callbacks: {
+        onopen: () => { reconnectAttemptsRef.current = 0; },
+        onmessage: (msg) => {
+          const audio = msg.data; // concatenated inline audio (base64) if present
+          if (audio) playChunk(audio);
+          const sc = msg.serverContent;
+          if (sc?.inputTranscription?.text) curInRef.current += sc.inputTranscription.text;
+          if (sc?.outputTranscription?.text) curOutRef.current += sc.outputTranscription.text;
+          if (sc?.turnComplete) {
+            if (curInRef.current.trim()) transcriptRef.current.push({ role: "REP", text: curInRef.current.trim() });
+            if (curOutRef.current.trim()) transcriptRef.current.push({ role: "PROSPECT", text: curOutRef.current.trim() });
+            curInRef.current = ""; curOutRef.current = "";
+          }
+          // Google periodically hands us a fresh resumption handle — keep
+          // the latest one so we can seamlessly reconnect if the
+          // connection drops (Google's WebSocket connections reset on
+          // their own roughly every 10 minutes, separate from actual
+          // conversation length).
+          if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate?.newHandle) {
+            resumeHandleRef.current = msg.sessionResumptionUpdate.newHandle;
+          }
+        },
+        onerror: (e) => {
+          if (intentionallyClosedRef.current) return;
+          setError(e?.message || "Connection error. The free voice line may be busy — try again in a moment.");
+          setState("error");
+          cleanup();
+        },
+        onclose: () => {
+          // If the user didn't end the call themselves, this was Google's
+          // own periodic connection reset — reconnect automatically using
+          // the resumption handle so the conversation continues without
+          // the trainee noticing anything happened.
+          if (intentionallyClosedRef.current) return;
+          if (reconnectAttemptsRef.current >= 5) {
+            setError("Lost the connection and couldn't reconnect. Please end the call and start a new one.");
+            setState("error");
+            return;
+          }
+          reconnectAttemptsRef.current += 1;
+          reconnectingRef.current = true;
+          connectGemini()
+            .then((s) => { sessionRef.current = s; reconnectingRef.current = false; })
+            .catch(() => {
+              reconnectingRef.current = false;
+              setError("Lost the connection and couldn't reconnect. Please end the call and start a new one.");
+              setState("error");
+            });
+        },
+      },
+      config: {
+        responseModalities: ["AUDIO"],
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        // Without this, Google's Live API hard-caps audio-only sessions at
+        // ~15 minutes and force-closes the connection. This setting tells
+        // Google to compress older parts of the conversation as it goes,
+        // which is their documented way to allow effectively unlimited
+        // session length instead of a fixed cutoff.
+        contextWindowCompression: { slidingWindow: {} },
+        // Lets us reconnect (above, in onclose) and pick the conversation
+        // back up exactly where it left off, instead of Google's routine
+        // ~10-minute connection reset ending the call outright.
+        sessionResumption: resumeHandleRef.current ? { handle: resumeHandleRef.current } : {},
+      },
+    });
+    return session;
+  };
+
   const start = async () => {
     setError("");
     setState("connecting");
+    intentionallyClosedRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    resumeHandleRef.current = null;
     try {
       // 1) get a short-lived token from our server
       const res = await fetch("/api/live-token", {
@@ -88,48 +177,17 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Could not start the call.");
+      tokenRef.current = json.token;
+      modelRef.current = json.model;
 
       // 2) connect to Gemini Live with the token
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: json.token, httpOptions: { apiVersion: "v1alpha" } });
-
       const outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
       outCtxRef.current = outCtx;
       nextPlayRef.current = 0;
       const recDest = outCtx.createMediaStreamDestination();
       recDestRef.current = recDest;
 
-      const session = await ai.live.connect({
-        model: json.model,
-        callbacks: {
-          onopen: () => {},
-          onmessage: (msg) => {
-            const audio = msg.data; // concatenated inline audio (base64) if present
-            if (audio) playChunk(audio);
-            const sc = msg.serverContent;
-            if (sc?.inputTranscription?.text) curInRef.current += sc.inputTranscription.text;
-            if (sc?.outputTranscription?.text) curOutRef.current += sc.outputTranscription.text;
-            if (sc?.turnComplete) {
-              if (curInRef.current.trim()) transcriptRef.current.push({ role: "REP", text: curInRef.current.trim() });
-              if (curOutRef.current.trim()) transcriptRef.current.push({ role: "PROSPECT", text: curOutRef.current.trim() });
-              curInRef.current = ""; curOutRef.current = "";
-            }
-          },
-          onerror: (e) => { setError(e?.message || "Connection error. The free voice line may be busy — try again in a moment."); setState("error"); cleanup(); },
-          onclose: () => {},
-        },
-        config: {
-          responseModalities: ["AUDIO"],
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          // Without this, Google's Live API hard-caps audio-only sessions at
-          // ~15 minutes and force-closes the connection. This setting tells
-          // Google to compress older parts of the conversation as it goes,
-          // which is their documented way to allow effectively unlimited
-          // session length instead of a fixed cutoff.
-          contextWindowCompression: { slidingWindow: {} },
-        },
-      });
+      const session = await connectGemini();
       sessionRef.current = session;
 
       // 3) capture microphone → stream PCM16 @ 16kHz
@@ -141,7 +199,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       const proc = inCtx.createScriptProcessor(4096, 1, 1);
       procRef.current = proc;
       proc.onaudioprocess = (ev) => {
-        if (!sessionRef.current) return;
+        if (!sessionRef.current || reconnectingRef.current) return;
         const input = ev.inputBuffer.getChannelData(0);
         const pcm = floatTo16BitPCM(input);
         const b64 = base64FromBytes(new Uint8Array(pcm.buffer));
