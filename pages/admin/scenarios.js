@@ -28,7 +28,7 @@ const VOICES = [
     { value: "Algieba", label: "Algieba - Smooth, relaxed" },
   ]},
 ];
-const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "", account_name: "", assigned_to: "" };
+const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "", account_name: "", assigned_to: "", demo_stages: [] };
 
 export default function AdminScenarios() {
   const { loading, me } = useProfile("admin");
@@ -53,7 +53,10 @@ export default function AdminScenarios() {
     e.preventDefault();
     setMsg(null);
     if (!form.title.trim()) return;
-    const payload = { ...form, assigned_to: form.assigned_to || null };
+    const cleanStages = (form.demo_stages || [])
+      .map((s) => ({ title: s.title || "", brief: s.brief || "", checkpoints: (s.checkpoints || []).map((c) => c.trim()).filter(Boolean) }))
+      .filter((s) => s.title.trim() || s.brief.trim() || s.checkpoints.length > 0);
+    const payload = { ...form, assigned_to: form.assigned_to || null, demo_stages: cleanStages };
     delete payload.id;
 
     if (editingId) {
@@ -76,6 +79,7 @@ export default function AdminScenarios() {
       mode: s.mode || "call", voice: s.voice || "Kore", persona: s.persona || "", product: s.product || "",
       traits: s.traits || "", objections: s.objections || "", goal: s.goal || "",
       account_name: s.account_name || "", assigned_to: s.assigned_to || "",
+      demo_stages: Array.isArray(s.demo_stages) ? s.demo_stages : [],
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -88,6 +92,32 @@ export default function AdminScenarios() {
     load();
   };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  // Pitch-stage helpers (Full Product Demo mode only)
+  const addStage = () => setForm({ ...form, demo_stages: [...form.demo_stages, { title: `Section ${form.demo_stages.length + 1}`, brief: "", checkpoints: [""] }] });
+  const removeStage = (i) => setForm({ ...form, demo_stages: form.demo_stages.filter((_, idx) => idx !== i) });
+  const updateStage = (i, key, value) => {
+    const next = [...form.demo_stages];
+    next[i] = { ...next[i], [key]: value };
+    setForm({ ...form, demo_stages: next });
+  };
+  const addCheckpoint = (i) => {
+    const next = [...form.demo_stages];
+    next[i] = { ...next[i], checkpoints: [...(next[i].checkpoints || []), ""] };
+    setForm({ ...form, demo_stages: next });
+  };
+  const updateCheckpoint = (i, ci, value) => {
+    const next = [...form.demo_stages];
+    const cps = [...(next[i].checkpoints || [])];
+    cps[ci] = value;
+    next[i] = { ...next[i], checkpoints: cps };
+    setForm({ ...form, demo_stages: next });
+  };
+  const removeCheckpoint = (i, ci) => {
+    const next = [...form.demo_stages];
+    next[i] = { ...next[i], checkpoints: (next[i].checkpoints || []).filter((_, idx) => idx !== ci) };
+    setForm({ ...form, demo_stages: next });
+  };
 
   const modeLabel = (m) => (MODES.find((x) => x.value === m) || MODES[0]).label;
   const voiceLabel = (v) => {
@@ -148,6 +178,55 @@ export default function AdminScenarios() {
                   {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                 </select></label>
             </div>
+
+            {form.mode === "demo" && (
+              <div style={{ marginTop: 8, marginBottom: 18, background: "var(--input-bg)", borderRadius: 12, padding: 16 }}>
+                <div className="row-between" style={{ marginBottom: 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Pitch stages</div>
+                  <button type="button" className="btn outline" onClick={addStage}>+ Add section</button>
+                </div>
+                <p className="mini" style={{ marginBottom: 12 }}>
+                  Break this demo into sections. The AI stays focused on each section's brief and won't move to the next until the rep has addressed its must-cover points.
+                </p>
+
+                {form.demo_stages.length === 0 && <div className="mini">No sections yet — the demo will run as one open-ended conversation. Add a section to structure it.</div>}
+
+                {form.demo_stages.map((stage, i) => (
+                  <div key={i} className="card pad" style={{ marginBottom: 12 }}>
+                    <div className="row-between" style={{ marginBottom: 10 }}>
+                      <input
+                        value={stage.title}
+                        onChange={(e) => updateStage(i, "title", e.target.value)}
+                        placeholder={`Section ${i + 1} title`}
+                        style={{ fontWeight: 700, border: "none", background: "transparent", padding: 0, fontSize: 14 }}
+                      />
+                      <button type="button" className="btn ghost" onClick={() => removeStage(i)}>Remove section</button>
+                    </div>
+                    <label className="field">
+                      <span>What this section is about</span>
+                      <input
+                        value={stage.brief}
+                        onChange={(e) => updateStage(i, "brief", e.target.value)}
+                        placeholder="e.g. Introduce the billing dashboard and daily sales reports"
+                      />
+                    </label>
+                    <label className="field" style={{ marginBottom: 6 }}><span>Must-cover points before moving on</span></label>
+                    {(stage.checkpoints || []).map((cp, ci) => (
+                      <div key={ci} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                        <input
+                          value={cp}
+                          onChange={(e) => updateCheckpoint(i, ci, e.target.value)}
+                          placeholder="e.g. Explain how real-time inventory sync works"
+                        />
+                        <button type="button" className="btn ghost" onClick={() => removeCheckpoint(i, ci)}>✕</button>
+                      </div>
+                    ))}
+                    <button type="button" className="btn outline sm" onClick={() => addCheckpoint(i)}>+ Add point</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <button className="btn primary">{editingId ? "Save changes" : "Create scenario"}</button>
             {editingId && <button type="button" className="btn ghost" style={{ marginLeft: 8 }} onClick={cancelEdit}>Cancel</button>}
           </form>
