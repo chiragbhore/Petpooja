@@ -28,11 +28,12 @@ const VOICES = [
     { value: "Algieba", label: "Algieba - Smooth, relaxed" },
   ]},
 ];
-const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "" };
+const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "", account_name: "", assigned_to: "" };
 
 export default function AdminScenarios() {
   const { loading, me } = useProfile("admin");
   const [scenarios, setScenarios] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState(blank);
   const [msg, setMsg] = useState(null);
   const [filterCat, setFilterCat] = useState("all");
@@ -42,6 +43,8 @@ export default function AdminScenarios() {
   const load = async () => {
     const { data } = await supabase.from("scenarios").select("*").order("created_at", { ascending: true });
     setScenarios(data || []);
+    const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("role", "employee").order("full_name", { ascending: true });
+    setEmployees(emps || []);
   };
   useEffect(() => { if (!loading) load(); }, [loading]);
 
@@ -49,7 +52,8 @@ export default function AdminScenarios() {
     e.preventDefault();
     setMsg(null);
     if (!form.title.trim()) return;
-    const { error } = await supabase.from("scenarios").insert(form);
+    const payload = { ...form, assigned_to: form.assigned_to || null };
+    const { error } = await supabase.from("scenarios").insert(payload);
     if (error) { setMsg(error.message); return; }
     setForm(blank);
     load();
@@ -109,6 +113,12 @@ export default function AdminScenarios() {
               <label className="field"><span>Personality traits</span><input value={form.traits} onChange={set("traits")} placeholder="friendly but time-poor" /></label>
               <label className="field"><span>Main objections</span><input value={form.objections} onChange={set("objections")} placeholder="doesn't see the need for software" /></label>
               <label className="field"><span>Rep's goal</span><input value={form.goal} onChange={set("goal")} placeholder="Book a live demo" /></label>
+              <label className="field"><span>Real account name (optional)</span><input value={form.account_name} onChange={set("account_name")} placeholder="e.g. Spice Route Kitchen — actual upcoming customer" /></label>
+              <label className="field"><span>Assign to a specific employee (optional)</span>
+                <select value={form.assigned_to} onChange={set("assigned_to")}>
+                  <option value="">Open to everyone</option>
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                </select></label>
             </div>
             <button className="btn primary">Create scenario</button>
           </form>
@@ -146,6 +156,12 @@ export default function AdminScenarios() {
                 <span className={"pill diff-" + s.difficulty}>{s.difficulty}</span>
               </div>
               <div className="mini" style={{ marginTop: 4 }}>{s.category || "General"} · {modeLabel(s.mode)}</div>
+              {(s.account_name || s.assigned_to) && (
+                <div className="mini" style={{ marginTop: 4, color: "var(--brand-700, var(--red-dark))" }}>
+                  {s.account_name ? `📋 ${s.account_name}` : ""}
+                  {s.assigned_to ? ` · 👤 ${employees.find((e) => e.id === s.assigned_to)?.full_name || "assigned"}` : ""}
+                </div>
+              )}
               <div className="mini">🎙️ {voiceLabel(s.voice)}</div>
               <div className="course-desc" style={{ marginTop: 8 }}>{s.persona}</div>
               {s.goal && <div className="mini" style={{ marginTop: 8 }}>🎯 {s.goal}</div>}
