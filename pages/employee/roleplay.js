@@ -28,7 +28,12 @@ export default function Roleplay() {
 
   const modeInfo = (m) => MODES.find((x) => x.value === m) || MODES[0];
 
-  const visible = scenarios.filter((s) =>
+  // Anything explicitly assigned to another employee stays hidden from you;
+  // anything assigned to you or open to everyone is visible.
+  const visibleToMe = scenarios.filter((s) => !s.assigned_to || s.assigned_to === me?.id);
+  const assignedToMe = visibleToMe.filter((s) => s.assigned_to === me?.id);
+  const openLibrary = visibleToMe.filter((s) => !s.assigned_to);
+  const visible = openLibrary.filter((s) =>
     (filterCat === "all" || s.category === filterCat) &&
     (filterDiff === "all" || s.difficulty === filterDiff) &&
     (filterMode === "all" || (s.mode || "call") === filterMode)
@@ -42,6 +47,30 @@ export default function Roleplay() {
       <main className="content">
         <h1 className="page">Roleplay practice</h1>
         <p className="sub">Practice a live sales conversation — by phone, a face-to-face visit, or a full product demo. You'll be scored at the end.</p>
+
+        {assignedToMe.length > 0 && (
+          <>
+            <div className="section-label">Assigned to you</div>
+            <div className="grid3" style={{ marginBottom: 22 }}>
+              {assignedToMe.map((s) => {
+                const mi = modeInfo(s.mode);
+                return (
+                  <div key={s.id} className="tile course-card" style={{ borderColor: "var(--red-dark)" }}>
+                    <div className="row-between">
+                      <span className="course-title">{s.title}</span>
+                      <span className={`pill diff-${s.difficulty}`}>{s.difficulty}</span>
+                    </div>
+                    <div className="mini">{mi.icon} {mi.label} · {s.category || "General"}</div>
+                    {s.account_name && <div className="mini" style={{ fontWeight: 700 }}>📋 {s.account_name}</div>}
+                    <div className="course-desc">Prospect: {s.persona}</div>
+                    {s.goal && <div className="mini" style={{ background: "#f6f7f8", padding: "8px 10px", borderRadius: 8 }}>🎯 {s.goal}</div>}
+                    <button className="btn primary" style={{ marginTop: 4 }} onClick={() => setActive(s)}>Start practice</button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         {scenarios.length === 0 ? (
           <div className="card pad mini">No roleplay scenarios yet. Your admin will add some soon.</div>
