@@ -48,6 +48,19 @@ function buildInstruction(s, products) {
   const naturalness =
     "Speak the way a real human being speaks in this exact situation — natural rhythm, occasional filler words, genuine reactions. Never narrate your own actions, never describe what you're about to do, and never repeat back instructions or phrasing you were given — just BE the character, in your own words, every time. Your very first line should be a short, simple, natural greeting appropriate to this situation — nothing more — and then you should WAIT to hear from the rep before reacting to anything else.";
 
+  let stagesBlock = "";
+  if (isDemo && Array.isArray(s.demo_stages) && s.demo_stages.length > 0) {
+    const stageText = s.demo_stages.map((stage, i) => {
+      const cps = (stage.checkpoints || []).filter(Boolean);
+      const cpText = cps.length > 0 ? " Must-cover points before this section can be considered done: " + cps.map((c) => `"${c}"`).join("; ") + "." : "";
+      return `Section ${i + 1} — ${stage.title || "Untitled"}: ${stage.brief || ""}${cpText}`;
+    }).join("\n");
+    stagesBlock =
+      "This demo has multiple sequential sections you must move through IN ORDER, tracked silently in your own mind — never announce section numbers or transitions out loud, just let your questions and reactions shift naturally as one topic gives way to the next, the way a real person's attention would move through a conversation.\n" +
+      stageText + "\n" +
+      "Stay engaged with the CURRENT section's topic and don't jump ahead to a later section's subject matter yourself. For each section, judge naturally whether the rep has reasonably addressed its must-cover points through the conversation (their own words are enough — they don't need to use exact phrasing). Only once you genuinely feel the current section has been covered should your questions and interest drift toward the next section's topic. If the rep tries to skip ahead without covering the current section's points, it's natural for you to steer back — e.g. by circling back to something unanswered — rather than following them ahead of schedule.";
+  }
+
   return [
     "You are role-playing a sales PROSPECT in a training simulator for Petpooja sales reps.",
     "Stay fully in character as the customer at all times. Never coach, never break character, never say or imply you are an AI.",
@@ -57,6 +70,7 @@ function buildInstruction(s, products) {
     s.traits ? `Your personality: ${s.traits}.` : "",
     s.objections ? `Your main hesitations: ${s.objections}.` : "",
     knowledgeBlock,
+    stagesBlock,
     pricingRule,
     languageRule,
     "React realistically to how good the rep's pitch actually is: reward genuine discovery and clear value, push back on weak or pushy lines.",
