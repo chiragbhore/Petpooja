@@ -35,6 +35,7 @@ export default function AdminScenarios() {
   const [scenarios, setScenarios] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
   const [msg, setMsg] = useState(null);
   const [filterCat, setFilterCat] = useState("all");
   const [filterDiff, setFilterDiff] = useState("all");
@@ -53,12 +54,39 @@ export default function AdminScenarios() {
     setMsg(null);
     if (!form.title.trim()) return;
     const payload = { ...form, assigned_to: form.assigned_to || null };
-    const { error } = await supabase.from("scenarios").insert(payload);
-    if (error) { setMsg(error.message); return; }
+    delete payload.id;
+
+    if (editingId) {
+      const { error } = await supabase.from("scenarios").update(payload).eq("id", editingId);
+      if (error) { setMsg(error.message); return; }
+      setMsg("✓ Scenario updated.");
+    } else {
+      const { error } = await supabase.from("scenarios").insert(payload);
+      if (error) { setMsg(error.message); return; }
+    }
     setForm(blank);
+    setEditingId(null);
     load();
   };
-  const del = async (id) => { if (confirm("Delete this scenario?")) { await supabase.from("scenarios").delete().eq("id", id); load(); } };
+
+  const startEdit = (s) => {
+    setEditingId(s.id);
+    setForm({
+      title: s.title || "", difficulty: s.difficulty || "Medium", category: s.category || "General",
+      mode: s.mode || "call", voice: s.voice || "Kore", persona: s.persona || "", product: s.product || "",
+      traits: s.traits || "", objections: s.objections || "", goal: s.goal || "",
+      account_name: s.account_name || "", assigned_to: s.assigned_to || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelEdit = () => { setEditingId(null); setForm(blank); setMsg(null); };
+  const del = async (id) => {
+    if (!confirm("Delete this scenario?")) return;
+    await supabase.from("scenarios").delete().eq("id", id);
+    if (editingId === id) cancelEdit();
+    load();
+  };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const modeLabel = (m) => (MODES.find((x) => x.value === m) || MODES[0]).label;
@@ -81,10 +109,10 @@ export default function AdminScenarios() {
       <main className="content">
         <h1 className="page">Roleplay scenarios</h1>
         <p className="sub">Design the prospects your team practices against — over the phone, a face-to-face visit, or a full product demo.</p>
-        {msg && <div className="msg err">{msg}</div>}
+        {msg && <div className={`msg ${msg.startsWith("✓") ? "ok" : "err"}`}>{msg}</div>}
 
         <div className="card pad" style={{ marginBottom: 22 }}>
-          <div style={{ fontWeight: 700, marginBottom: 14 }}>New scenario</div>
+          <div style={{ fontWeight: 700, marginBottom: 14 }}>{editingId ? "Edit scenario" : "New scenario"}</div>
           <form onSubmit={add}>
             <div className="grid2">
               <label className="field"><span>Title</span><input value={form.title} onChange={set("title")} required /></label>
@@ -120,7 +148,8 @@ export default function AdminScenarios() {
                   {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                 </select></label>
             </div>
-            <button className="btn primary">Create scenario</button>
+            <button className="btn primary">{editingId ? "Save changes" : "Create scenario"}</button>
+            {editingId && <button type="button" className="btn ghost" style={{ marginLeft: 8 }} onClick={cancelEdit}>Cancel</button>}
           </form>
         </div>
 
@@ -165,7 +194,10 @@ export default function AdminScenarios() {
               <div className="mini">🎙️ {voiceLabel(s.voice)}</div>
               <div className="course-desc" style={{ marginTop: 8 }}>{s.persona}</div>
               {s.goal && <div className="mini" style={{ marginTop: 8 }}>🎯 {s.goal}</div>}
-              <button className="btn danger" style={{ marginTop: 12 }} onClick={() => del(s.id)}>Delete</button>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button className="btn outline" onClick={() => startEdit(s)}>Edit</button>
+                <button className="btn danger" onClick={() => del(s.id)}>Delete</button>
+              </div>
             </div>
           ))}
           {visible.length === 0 && <div className="mini">No scenarios match this filter.</div>}
