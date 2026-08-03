@@ -3,10 +3,15 @@ import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
+const PAGE_SIZE = 10;
+
 export default function MyCalls() {
   const { loading, me } = useProfile("employee");
   const [calls, setCalls] = useState([]);
   const [scenarios, setScenarios] = useState({});
+  const [scoreFilter, setScoreFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("date_desc");
+  const [page, setPage] = useState(1);
   const [open, setOpen] = useState(null);
 
   useEffect(() => {
@@ -24,7 +29,29 @@ export default function MyCalls() {
     })();
   }, [loading, me]);
 
+  useEffect(() => { setPage(1); }, [scoreFilter, sortBy]);
+
+  const inScoreBand = (score) => {
+    if (scoreFilter === "all") return true;
+    if (scoreFilter === "high") return score >= 70;
+    if (scoreFilter === "mid") return score >= 50 && score < 70;
+    if (scoreFilter === "low") return score < 50;
+    return true;
+  };
+
+  const filtered = calls.filter((c) => inScoreBand(c.overall || 0));
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "score_desc") return (b.overall || 0) - (a.overall || 0);
+    if (sortBy === "score_asc") return (a.overall || 0) - (b.overall || 0);
+    if (sortBy === "date_asc") return new Date(a.created_at) - new Date(b.created_at);
+    return new Date(b.created_at) - new Date(a.created_at);
+  });
+
   const avg = calls.length ? Math.round(calls.reduce((a, c) => a + (c.overall || 0), 0) / calls.length) : 0;
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pageRows = sorted.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
 
   const openReport = async (call) => {
     let url = null;
@@ -50,12 +77,33 @@ export default function MyCalls() {
           <div className="tile"><div className="kpi">{calls.filter((c) => c.recording_path).length}</div><div className="kpi-label">Recordings available</div></div>
         </div>
 
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+          <label className="field" style={{ maxWidth: 200, marginBottom: 0 }}>
+            <span>Score</span>
+            <select value={scoreFilter} onChange={(e) => setScoreFilter(e.target.value)}>
+              <option value="all">All scores</option>
+              <option value="high">70 - 100 (Strong)</option>
+              <option value="mid">50 - 69 (Needs work)</option>
+              <option value="low">Below 50 (Weak)</option>
+            </select>
+          </label>
+          <label className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
+            <span>Sort by</span>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="date_desc">Newest first</option>
+              <option value="date_asc">Oldest first</option>
+              <option value="score_desc">Highest score first</option>
+              <option value="score_asc">Lowest score first</option>
+            </select>
+          </label>
+        </div>
+
         <div className="card">
           <table className="table">
             <thead><tr><th>Scenario</th><th>Date</th><th>Score</th><th></th></tr></thead>
             <tbody>
-              {calls.length === 0 && <tr><td colSpan={4} className="mini" style={{ padding: 20 }}>No calls yet — head to Roleplay to practice.</td></tr>}
-              {calls.map((c) => (
+              {pageRows.length === 0 && <tr><td colSpan={4} className="mini" style={{ padding: 20 }}>{calls.length === 0 ? "No calls yet — head to Roleplay to practice." : "No calls match this filter."}</td></tr>}
+              {pageRows.map((c) => (
                 <tr key={c.id}>
                   <td><b>{scenarios[c.scenario_id] || "Scenario"}</b></td>
                   <td className="mini">{new Date(c.created_at).toLocaleDateString()}</td>
@@ -66,6 +114,19 @@ export default function MyCalls() {
             </tbody>
           </table>
         </div>
+
+        {sorted.length > 0 && (
+          <div className="row-between" style={{ marginTop: 14 }}>
+            <div className="mini">
+              Showing {(pageSafe - 1) * PAGE_SIZE + 1}-{Math.min(pageSafe * PAGE_SIZE, sorted.length)} of {sorted.length}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn outline sm" disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>← Prev</button>
+              <span className="mini">Page {pageSafe} of {totalPages}</span>
+              <button className="btn outline sm" disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next →</button>
+            </div>
+          </div>
+        )}
 
         {open && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }} onClick={() => setOpen(null)}>
