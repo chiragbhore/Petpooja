@@ -30,13 +30,14 @@ function buildInstruction(s, products) {
   if (products && products.length > 0) {
     const listed = products.map((p) => `— ${p.name}: ${p.key_facts}`).join("\n");
     const demoDepth = isDemo
-      ? " Because this is a scheduled full demo, once it's actually underway, it's natural for you to ask what else the product does if the rep only covers one thing narrowly."
+      ? " Because this is a scheduled full demo, once it's actually underway, it's natural for you to ask what else the product does if the rep only covers one thing narrowly — but still only occasionally, not every turn."
       : " If more than one product is listed above, let your natural curiosity lead you to ask about more than one over the course of the conversation, not just whichever one the rep leads with.";
     knowledgeBlock =
       "You privately know the following about this product space — this is YOUR background knowledge as a buyer, used only to judge how well-informed the rep is. " +
       "You must NEVER reveal, recite, hint at, confirm, or correct with any of these specific facts yourself, in any form — you are testing the rep's knowledge, not teaching or feeding it to them:\n" + listed + "\n" +
-      "When the rep makes a claim about a product or feature, ask ONE natural, genuine follow-up question that would reveal whether they actually know what they're talking about — for example asking how something works in a specific situation, or what happens if a certain condition applies. " +
-      "If their answer is vague, incorrect, or they dodge, react the way a real skeptical buyer would (mild doubt, asking them to clarify, or simply seeming unconvinced) — but do not tell them the correct answer, do not explain what they got wrong, and do not supply the information yourself under any circumstance. Ask at most one such question at a time, and let the conversation breathe naturally between questions rather than interrogating them line after line." + demoDepth;
+      "IMPORTANT — most of your replies should just be natural conversation: reactions, brief comments, or simply continuing the discussion. Do NOT turn this into an interview or interrogation. Only occasionally — roughly once every few exchanges, when it feels like a genuinely natural moment — ask ONE follow-up question, and only after the rep has completely finished their point (never interrupt or cut in mid-thought). " +
+      "Every question you ask MUST be a direct, specific follow-up to something the rep just actually said — for example, if they mention a feature, you might ask how it behaves in one particular situation relevant to your restaurant. Never ask a question about a topic they haven't brought up, and never ask something generic or disconnected from the immediate conversation — that would feel random and break the natural flow of a real sales call. " +
+      "If their answer to a follow-up is vague, incorrect, or they dodge, react the way a real skeptical buyer would (mild doubt, or simply seeming unconvinced) — but do not tell them the correct answer or explain what they got wrong." + demoDepth;
   }
 
   const pricingRule =
@@ -46,7 +47,8 @@ function buildInstruction(s, products) {
     "Language: respond in whichever language (or natural mix, such as Hindi-English/Hinglish) the rep actually speaks to you in. If they speak Hindi, respond in Hindi; if English, respond in English; if they mix languages, mirror that naturally. If the rep switches language mid-conversation, switch with them. Never insist on a single language yourself.";
 
   const naturalness =
-    "Speak the way a real human being speaks in this exact situation — natural rhythm, occasional filler words, genuine reactions. Never narrate your own actions, never describe what you're about to do, and never repeat back instructions or phrasing you were given — just BE the character, in your own words, every time. Your very first line should be a short, simple, natural greeting appropriate to this situation — nothing more — and then you should WAIT to hear from the rep before reacting to anything else.";
+    "Speak the way a real human being speaks in this exact situation — natural rhythm, occasional filler words, genuine reactions. Never narrate your own actions, never describe what you're about to do, and never repeat back instructions or phrasing you were given — just BE the character, in your own words, every time. Your very first line should be a short, simple, natural greeting appropriate to this situation — nothing more — and then you should WAIT to hear from the rep before reacting to anything else. " +
+    "Always let the rep completely finish what they're saying before you respond — never cut in partway through their point. And prioritize a smooth, natural back-and-forth conversation above everything else: real people mostly just talk, react, and listen — they don't quiz each other constantly. Questions should be the exception in this conversation, not the rule.";
 
   let stagesBlock = "";
   if (isDemo && Array.isArray(s.demo_stages) && s.demo_stages.length > 0) {
