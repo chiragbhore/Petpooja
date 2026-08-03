@@ -3,12 +3,17 @@ import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
+const PAGE_SIZE = 10;
+
 export default function AdminReports() {
   const { loading, me } = useProfile("admin");
   const [calls, setCalls] = useState([]);
   const [employees, setEmployees] = useState({});
   const [scenarios, setScenarios] = useState({});
   const [filterEmp, setFilterEmp] = useState("all");
+  const [scoreFilter, setScoreFilter] = useState("all"); // all | high | mid | low
+  const [sortBy, setSortBy] = useState("date_desc"); // date_desc | date_asc | score_desc | score_asc
+  const [page, setPage] = useState(1);
   const [open, setOpen] = useState(null);
 
   useEffect(() => {
@@ -36,8 +41,49 @@ export default function AdminReports() {
     setOpen({ ...call, recording_url: url });
   };
 
-  const visible = filterEmp === "all" ? calls : calls.filter((c) => c.user_id === filterEmp);
-  const avg = visible.length ? Math.round(visible.reduce((a, c) => a + (c.overall || 0), 0) / visible.length) : 0;
+  // reset to page 1 whenever a filter changes, so you never land on an empty page
+  useEffect(() => { setPage(1); }, [filterEmp, scoreFilter, sortBy]);
+
+  const inScoreBand = (score) => {
+    if (scoreFilter === "all") return true;
+    if (scoreFilter === "high") return score >= 70;
+    if (scoreFilter === "mid") return score >= 50 && score < 70;
+    if (scoreFilter === "low") return score < 50;
+    return true;
+  };
+
+  const filtered = calls
+    .filter((c) => filterEmp === "all" || c.user_id === filterEmp)
+    .filter((c) => inScoreBand(c.overall || 0));
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "score_desc") return (b.overall || 0) - (a.overall || 0);
+    if (sortBy === "score_asc") return (a.overall || 0) - (b.overall || 0);
+    if (sortBy === "date_asc") return new Date(a.created_at) - new Date(b.created_at);
+    return new Date(b.created_at) - new Date(a.created_at); // date_desc (default)
+  });
+
+  const avg = filtered.length ? Math.round(filtered.reduce((a, c) => a + (c.overall || 0), 0) / filtered.length) : 0;
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pageRows = sorted.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
+
+  const exportCsv = () => {
+    const header = ["Employee", "Scenario", "Date", "Score"];
+    const lines = sorted.map((c) => [
+      (employees[c.user_id] || "").replace(/,/g, " "),
+      (scenarios[c.scenario_id] || "Scenario").replace(/,/g, " "),
+      new Date(c.created_at).toLocaleDateString(),
+      c.overall,
+    ].join(","));
+    const csv = [header.join(","), ...lines].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "call-reports.csv";
+    a.click();
+  };
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
@@ -49,25 +95,46 @@ export default function AdminReports() {
         <p className="sub">Every roleplay call across your team, with the full AI pitch report.</p>
 
         <div className="grid3" style={{ marginBottom: 16 }}>
-          <div className="tile"><div className="kpi">{visible.length}</div><div className="kpi-label">Calls</div></div>
+          <div className="tile"><div className="kpi">{filtered.length}</div><div className="kpi-label">Calls</div></div>
           <div className="tile"><div className="kpi">{avg}</div><div className="kpi-label">Average score</div></div>
-          <div className="tile"><div className="kpi">{visible.filter((c) => c.recording_path).length}</div><div className="kpi-label">Recordings available</div></div>
+          <div className="tile"><div className="kpi">{filtered.filter((c) => c.recording_path).length}</div><div className="kpi-label">Recordings available</div></div>
         </div>
 
-        <label className="field" style={{ maxWidth: 260, marginBottom: 14 }}>
-          <span>Filter by employee</span>
-          <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>
-            <option value="all">All employees</option>
-            {Object.entries(employees).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
-        </label>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+          <label className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
+            <span>Filter by employee</span>
+            <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>
+              <option value="all">All employees</option>
+              {Object.entries(employees).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+          <label className="field" style={{ maxWidth: 200, marginBottom: 0 }}>
+            <span>Score</span>
+            <select value={scoreFilter} onChange={(e) => setScoreFilter(e.target.value)}>
+              <option value="all">All scores</option>
+              <option value="high">70 - 100 (Strong)</option>
+              <option value="mid">50 - 69 (Needs work)</option>
+              <option value="low">Below 50 (Weak)</option>
+            </select>
+          </label>
+          <label className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
+            <span>Sort by</span>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="date_desc">Newest first</option>
+              <option value="date_asc">Oldest first</option>
+              <option value="score_desc">Highest score first</option>
+              <option value="score_asc">Lowest score first</option>
+            </select>
+          </label>
+          <button className="btn outline" onClick={exportCsv} style={{ marginBottom: 0 }}>⬇ Export CSV</button>
+        </div>
 
         <div className="card">
           <table className="table">
             <thead><tr><th>Employee</th><th>Scenario</th><th>Date</th><th>Score</th><th></th></tr></thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={5} className="mini" style={{ padding: 20 }}>No calls yet.</td></tr>}
-              {visible.map((c) => (
+              {pageRows.length === 0 && <tr><td colSpan={5} className="mini" style={{ padding: 20 }}>No calls match this filter.</td></tr>}
+              {pageRows.map((c) => (
                 <tr key={c.id}>
                   <td><b>{employees[c.user_id] || "—"}</b></td>
                   <td>{scenarios[c.scenario_id] || "Scenario"}</td>
@@ -79,6 +146,19 @@ export default function AdminReports() {
             </tbody>
           </table>
         </div>
+
+        {sorted.length > 0 && (
+          <div className="row-between" style={{ marginTop: 14 }}>
+            <div className="mini">
+              Showing {(pageSafe - 1) * PAGE_SIZE + 1}-{Math.min(pageSafe * PAGE_SIZE, sorted.length)} of {sorted.length}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn outline sm" disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)}>← Prev</button>
+              <span className="mini">Page {pageSafe} of {totalPages}</span>
+              <button className="btn outline sm" disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)}>Next →</button>
+            </div>
+          </div>
+        )}
 
         {open && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }} onClick={() => setOpen(null)}>
