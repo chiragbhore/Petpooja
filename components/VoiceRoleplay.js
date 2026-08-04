@@ -41,6 +41,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const streamRef = useRef(null);
   const procRef = useRef(null);
   const nextPlayRef = useRef(0);
+  const activeSourcesRef = useRef([]); // scheduled AI-voice buffers, so we can cut them off on interruption
   const transcriptRef = useRef([]); // {role, text}
   const curInRef = useRef("");
   const curOutRef = useRef("");
@@ -71,6 +72,8 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     try { inCtxRef.current && inCtxRef.current.state !== "closed" && inCtxRef.current.close(); } catch {}
     try { sessionRef.current && sessionRef.current.close(); } catch {}
     try { recorderRef.current && recorderRef.current.state !== "inactive" && recorderRef.current.stop(); } catch {}
+    activeSourcesRef.current.forEach((s) => { try { s.stop(); } catch {} });
+    activeSourcesRef.current = [];
     sessionRef.current = null;
   };
 
@@ -93,7 +96,25 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     src.start(start);
     nextPlayRef.current = start + buf.duration;
     setSpeaking(true);
-    src.onended = () => { if (nextPlayRef.current <= ctx.currentTime + 0.05) setSpeaking(false); };
+    activeSourcesRef.current.push(src);
+    src.onended = () => {
+      activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== src);
+      if (nextPlayRef.current <= ctx.currentTime + 0.05) setSpeaking(false);
+    };
+  };
+
+  // Called the instant Gemini tells us the rep started talking over the AI
+  // (a real "barge-in"). Immediately stops every bit of AI voice that was
+  // still queued to play, instead of letting it keep talking over the rep
+  // or picking the old sentence back up afterward.
+  const stopPlaybackForInterruption = () => {
+    activeSourcesRef.current.forEach((s) => { try { s.stop(); } catch {} });
+    activeSourcesRef.current = [];
+    if (outCtxRef.current) nextPlayRef.current = outCtxRef.current.currentTime;
+    setSpeaking(false);
+    // The interrupted sentence never actually finished, so don't save a
+    // half-spoken line into the transcript.
+    curOutRef.current = "";
   };
 
   // Opens (or re-opens, via session resumption) the live connection to
@@ -138,6 +159,10 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           const audio = msg.data; // concatenated inline audio (base64) if present
           if (audio) playChunk(audio);
           const sc = msg.serverContent;
+          if (sc?.interrupted) {
+            console.log("[PitchLab] Rep interrupted the AI mid-sentence — stopping queued audio.");
+            stopPlaybackForInterruption();
+          }
           if (sc?.inputTranscription?.text) curInRef.current += sc.inputTranscription.text;
           if (sc?.outputTranscription?.text) curOutRef.current += sc.outputTranscription.text;
           if (sc?.turnComplete) {
