@@ -10,6 +10,8 @@ export default function MyCalls() {
   const [calls, setCalls] = useState([]);
   const [scenarios, setScenarios] = useState({});
   const [scoreFilter, setScoreFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState("date_desc");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(null);
@@ -29,7 +31,7 @@ export default function MyCalls() {
     })();
   }, [loading, me]);
 
-  useEffect(() => { setPage(1); }, [scoreFilter, sortBy]);
+  useEffect(() => { setPage(1); }, [scoreFilter, sortBy, dateFrom, dateTo]);
 
   const inScoreBand = (score) => {
     if (scoreFilter === "all") return true;
@@ -39,7 +41,15 @@ export default function MyCalls() {
     return true;
   };
 
-  const filtered = calls.filter((c) => inScoreBand(c.overall || 0));
+  const inDateRange = (createdAt) => {
+    if (!dateFrom && !dateTo) return true;
+    const d = new Date(createdAt);
+    if (dateFrom && d < new Date(dateFrom + "T00:00:00")) return false;
+    if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
+    return true;
+  };
+
+  const filtered = calls.filter((c) => inScoreBand(c.overall || 0)).filter((c) => inDateRange(c.created_at));
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === "score_desc") return (b.overall || 0) - (a.overall || 0);
     if (sortBy === "score_asc") return (a.overall || 0) - (b.overall || 0);
@@ -87,6 +97,17 @@ export default function MyCalls() {
               <option value="low">Below 50 (Weak)</option>
             </select>
           </label>
+          <label className="field" style={{ maxWidth: 160, marginBottom: 0 }}>
+            <span>From date</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </label>
+          <label className="field" style={{ maxWidth: 160, marginBottom: 0 }}>
+            <span>To date</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          {(dateFrom || dateTo) && (
+            <button className="btn ghost" style={{ marginBottom: 0 }} onClick={() => { setDateFrom(""); setDateTo(""); }}>Clear dates</button>
+          )}
           <label className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
             <span>Sort by</span>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
@@ -106,7 +127,11 @@ export default function MyCalls() {
               {pageRows.map((c) => (
                 <tr key={c.id}>
                   <td><b>{scenarios[c.scenario_id] || "Scenario"}</b></td>
-                  <td className="mini">{new Date(c.created_at).toLocaleDateString()}</td>
+                  <td className="mini">
+                    {new Date(c.created_at).toLocaleDateString()}
+                    <br />
+                    {new Date(c.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </td>
                   <td><span className={`pill ${c.overall >= 70 ? "red" : "gray"}`}>{c.overall}/100</span></td>
                   <td style={{ textAlign: "right" }}><button className="btn ghost" onClick={() => openReport(c)}>View report</button></td>
                 </tr>
