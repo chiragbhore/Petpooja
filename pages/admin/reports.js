@@ -12,6 +12,8 @@ export default function AdminReports() {
   const [scenarios, setScenarios] = useState({});
   const [filterEmp, setFilterEmp] = useState("all");
   const [scoreFilter, setScoreFilter] = useState("all"); // all | high | mid | low
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState("date_desc"); // date_desc | date_asc | score_desc | score_asc
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(null);
@@ -42,7 +44,7 @@ export default function AdminReports() {
   };
 
   // reset to page 1 whenever a filter changes, so you never land on an empty page
-  useEffect(() => { setPage(1); }, [filterEmp, scoreFilter, sortBy]);
+  useEffect(() => { setPage(1); }, [filterEmp, scoreFilter, sortBy, dateFrom, dateTo]);
 
   const inScoreBand = (score) => {
     if (scoreFilter === "all") return true;
@@ -52,9 +54,18 @@ export default function AdminReports() {
     return true;
   };
 
+  const inDateRange = (createdAt) => {
+    if (!dateFrom && !dateTo) return true;
+    const d = new Date(createdAt);
+    if (dateFrom && d < new Date(dateFrom + "T00:00:00")) return false;
+    if (dateTo && d > new Date(dateTo + "T23:59:59")) return false;
+    return true;
+  };
+
   const filtered = calls
     .filter((c) => filterEmp === "all" || c.user_id === filterEmp)
-    .filter((c) => inScoreBand(c.overall || 0));
+    .filter((c) => inScoreBand(c.overall || 0))
+    .filter((c) => inDateRange(c.created_at));
 
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === "score_desc") return (b.overall || 0) - (a.overall || 0);
@@ -70,11 +81,11 @@ export default function AdminReports() {
   const pageRows = sorted.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
 
   const exportCsv = () => {
-    const header = ["Employee", "Scenario", "Date", "Score"];
+    const header = ["Employee", "Scenario", "Date & Time", "Score"];
     const lines = sorted.map((c) => [
       (employees[c.user_id] || "").replace(/,/g, " "),
       (scenarios[c.scenario_id] || "Scenario").replace(/,/g, " "),
-      new Date(c.created_at).toLocaleDateString(),
+      new Date(c.created_at).toLocaleDateString() + " " + new Date(c.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       c.overall,
     ].join(","));
     const csv = [header.join(","), ...lines].join("\n");
@@ -117,6 +128,17 @@ export default function AdminReports() {
               <option value="low">Below 50 (Weak)</option>
             </select>
           </label>
+          <label className="field" style={{ maxWidth: 160, marginBottom: 0 }}>
+            <span>From date</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </label>
+          <label className="field" style={{ maxWidth: 160, marginBottom: 0 }}>
+            <span>To date</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          {(dateFrom || dateTo) && (
+            <button className="btn ghost" style={{ marginBottom: 0 }} onClick={() => { setDateFrom(""); setDateTo(""); }}>Clear dates</button>
+          )}
           <label className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
             <span>Sort by</span>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
@@ -138,7 +160,11 @@ export default function AdminReports() {
                 <tr key={c.id}>
                   <td><b>{employees[c.user_id] || "—"}</b></td>
                   <td>{scenarios[c.scenario_id] || "Scenario"}</td>
-                  <td className="mini">{new Date(c.created_at).toLocaleDateString()}</td>
+                  <td className="mini">
+                    {new Date(c.created_at).toLocaleDateString()}
+                    <br />
+                    {new Date(c.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </td>
                   <td><span className={`pill ${c.overall >= 70 ? "red" : "gray"}`}>{c.overall}/100</span></td>
                   <td style={{ textAlign: "right" }}><button className="btn ghost" onClick={() => openReport(c)}>View report</button></td>
                 </tr>
