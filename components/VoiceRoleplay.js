@@ -472,10 +472,30 @@ export default function VoiceRoleplay({ scenario, onClose }) {
               {state === "ended" && !scoring && <button className="btn outline full" onClick={() => { cleanup(); onClose(); }}>Close</button>}
             </div>
 
-            <div className="mini" style={{ marginTop: 14 }}>
-              <b>Scenario brief</b><br />
-              Persona: {scenario.persona}<br />
-              {scenario.goal && <>Goal: {scenario.goal}</>}
+            <div className="tile" style={{ marginTop: 14, textAlign: "left" }}>
+              <div className="row-between" style={{ marginBottom: 8 }}>
+                <b>Scenario brief</b>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <span className={`pill diff-${scenario.difficulty}`}>{scenario.difficulty}</span>
+                  <span className="pill">{scenario.category || "General"}</span>
+                </div>
+              </div>
+              <div className="mini" style={{ display: "grid", gap: 6, textAlign: "left" }}>
+                {scenario.account_name && <div><b>Account:</b> {scenario.account_name}</div>}
+                <div><b>Persona:</b> {scenario.persona}</div>
+                {scenario.product && <div><b>Product:</b> {scenario.product}</div>}
+                {scenario.traits && <div><b>Personality:</b> {scenario.traits}</div>}
+                {scenario.objections && <div><b>Likely objections:</b> {scenario.objections}</div>}
+                {scenario.goal && <div><b>Your goal:</b> {scenario.goal}</div>}
+                {Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0 && (
+                  <div>
+                    <b>Pitch sections to cover:</b>
+                    <ol style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                      {scenario.demo_stages.map((st, i) => <li key={i}>{st.title || `Section ${i + 1}`}</li>)}
+                    </ol>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
