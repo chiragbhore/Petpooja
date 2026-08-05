@@ -12,6 +12,9 @@ export default function Employees() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [assignFor, setAssignFor] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkCourse, setBulkCourse] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const authHeader = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -63,6 +66,34 @@ export default function Employees() {
     }
   };
 
+  const toggleSelect = (id) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+  const toggleSelectAll = () => {
+    if (selected.size === list.length) setSelected(new Set());
+    else setSelected(new Set(list.map((e) => e.id)));
+  };
+
+  const bulkAssign = async () => {
+    if (!bulkCourse || selected.size === 0) return;
+    setBulkBusy(true);
+    const rows = [...selected]
+      .filter((userId) => !isAssigned(userId, bulkCourse))
+      .map((userId) => ({ user_id: userId, course_id: bulkCourse }));
+    if (rows.length > 0) {
+      const { error } = await supabase.from("enrollments").insert(rows);
+      if (error) { setMsg({ type: "err", text: error.message }); setBulkBusy(false); return; }
+    }
+    const courseTitle = courses.find((c) => c.id === bulkCourse)?.title || "the course";
+    setMsg({ type: "ok", text: `Assigned "${courseTitle}" to ${selected.size} employee${selected.size === 1 ? "" : "s"}.` });
+    setSelected(new Set());
+    setBulkCourse("");
+    setBulkBusy(false);
+    refresh();
+  };
+
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
   return (
@@ -90,14 +121,37 @@ export default function Employees() {
           </form>
         </div>
 
+        {selected.size > 0 && (
+          <div className="card pad" style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div className="mini" style={{ fontWeight: 700 }}>{selected.size} employee{selected.size === 1 ? "" : "s"} selected</div>
+            <label className="field" style={{ marginBottom: 0, minWidth: 220 }}>
+              <span>Assign course to all selected</span>
+              <select value={bulkCourse} onChange={(e) => setBulkCourse(e.target.value)}>
+                <option value="">Choose a course…</option>
+                {courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </select>
+            </label>
+            <button className="btn primary" disabled={!bulkCourse || bulkBusy} onClick={bulkAssign}>
+              {bulkBusy ? "Assigning…" : `Assign to ${selected.size}`}
+            </button>
+            <button className="btn ghost" onClick={() => setSelected(new Set())}>Clear selection</button>
+          </div>
+        )}
+
         <div className="card">
           <table className="table">
-            <thead><tr><th>Name</th><th>Email</th><th>Team</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <th style={{ width: 32 }}><input type="checkbox" checked={list.length > 0 && selected.size === list.length} onChange={toggleSelectAll} /></th>
+                <th>Name</th><th>Email</th><th>Team</th><th></th>
+              </tr>
+            </thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={4} className="mini" style={{ padding: 20 }}>No employees yet. Add your first one above.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={5} className="mini" style={{ padding: 20 }}>No employees yet. Add your first one above.</td></tr>}
               {list.map((emp) => (
                 <Fragment key={emp.id}>
                   <tr>
+                    <td><input type="checkbox" checked={selected.has(emp.id)} onChange={() => toggleSelect(emp.id)} /></td>
                     <td><div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       <div className="avatar">{emp.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}</div>
                       <b>{emp.full_name}</b></div></td>
@@ -110,7 +164,7 @@ export default function Employees() {
                   </tr>
                   {assignFor === emp.id && (
                     <tr>
-                      <td colSpan={4} style={{ background: "var(--input-bg)" }}>
+                      <td colSpan={5} style={{ background: "var(--input-bg)" }}>
                         <div className="mini" style={{ marginBottom: 8, fontWeight: 700 }}>Assign courses to {emp.full_name.split(" ")[0]}</div>
                         {courses.length === 0 ? <span className="mini">No courses yet — create some first.</span> : (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
