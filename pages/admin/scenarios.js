@@ -104,6 +104,7 @@ export default function AdminScenarios() {
   };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  // When restaurant type changes, drop any selected services that no longer belong to it
   const setRestaurantType = (e) => {
     const value = e.target.value;
     const validNames = new Set(catalog.filter((c) => c.restaurant_type === value).map((c) => c.service_name));
@@ -114,6 +115,7 @@ export default function AdminScenarios() {
     setForm({ ...form, selected_services: has ? form.selected_services.filter((n) => n !== name) : [...(form.selected_services || []), name] });
   };
 
+  // Pitch-stage helpers (Full Product Demo mode only)
   const addStage = () => setForm({ ...form, demo_stages: [...form.demo_stages, { title: `Section ${form.demo_stages.length + 1}`, brief: "", checkpoints: [""] }] });
   const removeStage = (i) => setForm({ ...form, demo_stages: form.demo_stages.filter((_, idx) => idx !== i) });
   const updateStage = (i, key, value) => {
