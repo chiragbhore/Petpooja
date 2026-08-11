@@ -121,13 +121,20 @@ export default async function handler(req, res) {
 
   const { data: products } = await supabaseAdmin.from("product_knowledge").select("name, key_facts").order("sort_order", { ascending: true });
 
+  // If specific services were hand-picked, use just those. Otherwise, as
+  // long as a restaurant type is set, automatically pull EVERY catalog
+  // service for that type — this means the AI has real pain points to draw
+  // on the moment a restaurant type is chosen, with no extra step needed.
   let vasEntries = [];
-  if (scenario.restaurant_type && Array.isArray(scenario.selected_services) && scenario.selected_services.length > 0) {
-    const { data: vas } = await supabaseAdmin
+  if (scenario.restaurant_type) {
+    let query = supabaseAdmin
       .from("vas_catalog")
       .select("service_name, problem_solved")
-      .eq("restaurant_type", scenario.restaurant_type)
-      .in("service_name", scenario.selected_services);
+      .eq("restaurant_type", scenario.restaurant_type);
+    if (Array.isArray(scenario.selected_services) && scenario.selected_services.length > 0) {
+      query = query.in("service_name", scenario.selected_services);
+    }
+    const { data: vas } = await query;
     vasEntries = vas || [];
   }
 

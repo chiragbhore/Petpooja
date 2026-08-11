@@ -51,16 +51,20 @@ export default async function handler(req, res) {
     previousLine = "The rep's PREVIOUS call scored " + previous.overall + "/100. Their prior weak areas: " + JSON.stringify(previous.improvements) + ". Prior summary: " + JSON.stringify(previous.executive_summary) + ".";
   }
 
-  // Fetch the specific operational pain points this scenario was set up to
-  // surface (the value-added services the admin selected), so we can grade
-  // whether the rep actually caught them and pitched the right product.
+  // Fetch the operational pain points this scenario was set up to surface.
+  // If specific services were hand-picked, grade against just those.
+  // Otherwise, as long as a restaurant type is set, grade against every
+  // catalog service for that type.
   var vasEntries = [];
-  if (scenario && scenario.restaurant_type && Array.isArray(scenario.selected_services) && scenario.selected_services.length > 0) {
-    var vasRes = await supabaseAdmin
+  if (scenario && scenario.restaurant_type) {
+    var vasQuery = supabaseAdmin
       .from("vas_catalog")
       .select("service_name, problem_solved")
-      .eq("restaurant_type", scenario.restaurant_type)
-      .in("service_name", scenario.selected_services);
+      .eq("restaurant_type", scenario.restaurant_type);
+    if (Array.isArray(scenario.selected_services) && scenario.selected_services.length > 0) {
+      vasQuery = vasQuery.in("service_name", scenario.selected_services);
+    }
+    var vasRes = await vasQuery;
     vasEntries = vasRes.data || [];
   }
 
