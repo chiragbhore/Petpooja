@@ -9,7 +9,9 @@ const DEFAULT_VOICE = process.env.GEMINI_VOICE || "Kore";
 // any practical time limit while keeping a sane technical safety net.
 const TOKEN_LIFETIME_MS = 4 * 60 * 60 * 1000;
 
-function buildInstruction(s, products) {
+const RESTAURANT_LABEL = { dine_in: "a dine-in restaurant", qsr: "a QSR (quick service) outlet", cloud_kitchen: "a cloud kitchen" };
+
+function buildInstruction(s, products, vasEntries) {
   const mode = s.mode || "call";
   const isInPerson = mode === "in_person";
   const isDemo = mode === "demo";
@@ -26,6 +28,10 @@ function buildInstruction(s, products) {
       "This is a phone call — the rep dialed in and you picked up. You do not know yet why they're calling. Answer naturally the way a real person would, and let THEM state the reason for the call before you react to anything about a product or pitch.";
   }
 
+  const restaurantLine = s.restaurant_type && RESTAURANT_LABEL[s.restaurant_type]
+    ? `You personally run ${RESTAURANT_LABEL[s.restaurant_type]}.`
+    : "";
+
   let knowledgeBlock = "";
   if (products && products.length > 0) {
     const listed = products.map((p) => `— ${p.name}: ${p.key_facts}`).join("\n");
@@ -38,6 +44,18 @@ function buildInstruction(s, products) {
       "IMPORTANT — most of your replies should just be natural conversation: reactions, brief comments, or simply continuing the discussion. Do NOT turn this into an interview or interrogation. Only occasionally — roughly once every few exchanges, when it feels like a genuinely natural moment — ask ONE follow-up question, and only after the rep has completely finished their point (never interrupt or cut in mid-thought). " +
       "Every question you ask MUST be a direct, specific follow-up to something the rep just actually said — for example, if they mention a feature, you might ask how it behaves in one particular situation relevant to your restaurant. Never ask a question about a topic they haven't brought up, and never ask something generic or disconnected from the immediate conversation — that would feel random and break the natural flow of a real sales call. " +
       "If their answer to a follow-up is vague, incorrect, or they dodge, react the way a real skeptical buyer would (mild doubt, or simply seeming unconvinced) — but do not tell them the correct answer or explain what they got wrong." + demoDepth;
+  }
+
+  let vasBlock = "";
+  if (vasEntries && vasEntries.length > 0) {
+    const entryText = vasEntries.map((v) =>
+      `— Operational problem you're currently living with: "${v.problem_solved}" (this is solved by Petpooja's ${v.service_name}, but you don't know that name — you just feel the pain of it day to day).`
+    ).join("\n");
+    vasBlock =
+      "You are ALSO currently dealing with these real, specific operational problems in your restaurant — these are genuine day-to-day frustrations for you, not something you'd describe using technical or product language:\n" + entryText + "\n" +
+      "Weave these in naturally over the course of the conversation as real complaints or frustrations come up in context — for example if the rep asks how things are going, or asks about a related area of your operations, it's natural to vent about one of these. Don't list them all at once or announce them like a checklist; drip them in the way a real business owner would mention frustrations in normal conversation. " +
+      "STRICT RULE — you must never, under any circumstance, hint at, name, or suggest the product/feature that solves a problem, and never confirm whether something the rep says is correct or on the right track. You are describing your own daily frustrations as a business owner, nothing more — you have no idea what Petpooja's products are called or what they do. Never say things like 'something that could help' or 'is there a tool for that' — that would be feeding the rep the answer. Simply state the problem as your own genuine complaint and let the rep figure out the connection entirely on their own. " +
+      "This is the real test of the rep's discovery skill: a sharp rep will notice these pain points when you mention them and connect them to the right Petpooja product, then explain how it would help. If the rep asks a genuinely good discovery question that surfaces one of these problems, or correctly identifies which of your problems a feature they're pitching would solve, respond enthusiastically like a buyer who feels truly heard — but even then, don't confirm they're '100% right' or name the feature yourself, just react like a satisfied customer. If they miss an obvious opening — you complain about something and they don't pick up on it or don't connect it to anything relevant — stay only mildly engaged, the way a real prospect would when a rep isn't really listening, and do not repeat or rephrase the hint to make it easier for them.";
   }
 
   const pricingRule =
@@ -62,18 +80,21 @@ function buildInstruction(s, products) {
     stagesBlock =
       "This demo has multiple sequential sections you must move through IN ORDER, tracked silently in your own mind — never announce section numbers or transitions out loud, just let your questions and reactions shift naturally as one topic gives way to the next, the way a real person's attention would move through a conversation.\n" +
       stageText + "\n" +
-      "Stay engaged with the CURRENT section's topic and don't jump ahead to a later section's subject matter yourself. For each section, judge naturally whether the rep has reasonably addressed its must-cover points through the conversation (their own words are enough — they don't need to use exact phrasing). Only once you genuinely feel the current section has been covered should your questions and interest drift toward the next section's topic. If the rep tries to skip ahead without covering the current section's points, it's natural for you to steer back — e.g. by circling back to something unanswered — rather than following them ahead of schedule.";
+      "Stay engaged with the CURRENT section's topic and don't jump ahead to a later section's subject matter yourself. For each section, judge naturally whether the rep has reasonably addressed its must-cover points through the conversation (their own words are enough — they don't need to use exact phrasing). Only once you genuinely feel the current section has been covered should your questions and interest drift toward the next section's topic. If the rep tries to skip ahead without covering the current section's points, it's natural for you to steer back — e.g. by circling back to something unanswered — rather than following them ahead of schedule. " +
+      "Never hint at, list, or reveal what the must-cover points actually are, even indirectly — the rep must demonstrate this knowledge unprompted. Simply behave like someone whose curiosity hasn't been satisfied yet, without ever suggesting what would satisfy it.";
   }
 
   return [
     "You are role-playing a sales PROSPECT in a training simulator for Petpooja sales reps.",
     "Stay fully in character as the customer at all times. Never coach, never break character, never say or imply you are an AI.",
     `You are: ${s.persona || "a restaurant owner"}.`,
+    restaurantLine,
     settingLine,
     s.product ? `The rep is trying to sell you: ${s.product}.` : "",
     s.traits ? `Your personality: ${s.traits}.` : "",
     s.objections ? `Your main hesitations: ${s.objections}.` : "",
     knowledgeBlock,
+    vasBlock,
     stagesBlock,
     pricingRule,
     languageRule,
@@ -100,6 +121,16 @@ export default async function handler(req, res) {
 
   const { data: products } = await supabaseAdmin.from("product_knowledge").select("name, key_facts").order("sort_order", { ascending: true });
 
+  let vasEntries = [];
+  if (scenario.restaurant_type && Array.isArray(scenario.selected_services) && scenario.selected_services.length > 0) {
+    const { data: vas } = await supabaseAdmin
+      .from("vas_catalog")
+      .select("service_name, problem_solved")
+      .eq("restaurant_type", scenario.restaurant_type)
+      .in("service_name", scenario.selected_services);
+    vasEntries = vas || [];
+  }
+
   const voiceName = scenario.voice || DEFAULT_VOICE;
 
   try {
@@ -123,7 +154,7 @@ export default async function handler(req, res) {
           config: {
             responseModalities: ["AUDIO"],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } } },
-            systemInstruction: { parts: [{ text: buildInstruction(scenario, products) }] },
+            systemInstruction: { parts: [{ text: buildInstruction(scenario, products, vasEntries) }] },
             inputAudioTranscription: {},
             outputAudioTranscription: {},
           },

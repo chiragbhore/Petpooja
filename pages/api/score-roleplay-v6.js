@@ -1,7 +1,6 @@
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
 const GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"];
-const RECORDING_DAYS = 30;
 
 const PARAMETERS = [
   "Product Knowledge",
@@ -52,6 +51,39 @@ export default async function handler(req, res) {
     previousLine = "The rep's PREVIOUS call scored " + previous.overall + "/100. Their prior weak areas: " + JSON.stringify(previous.improvements) + ". Prior summary: " + JSON.stringify(previous.executive_summary) + ".";
   }
 
+  // Fetch the specific operational pain points this scenario was set up to
+  // surface (the value-added services the admin selected), so we can grade
+  // whether the rep actually caught them and pitched the right product.
+  var vasEntries = [];
+  if (scenario && scenario.restaurant_type && Array.isArray(scenario.selected_services) && scenario.selected_services.length > 0) {
+    var vasRes = await supabaseAdmin
+      .from("vas_catalog")
+      .select("service_name, problem_solved")
+      .eq("restaurant_type", scenario.restaurant_type)
+      .in("service_name", scenario.selected_services);
+    vasEntries = vasRes.data || [];
+  }
+
+  var vasLine = "";
+  if (vasEntries.length > 0) {
+    var vasList = vasEntries.map(function (v) { return "- " + v.service_name + ": the prospect was scripted to be frustrated about \"" + v.problem_solved + "\""; }).join("\n");
+    vasLine =
+      "This scenario was specifically set up to test discovery skill: the prospect was instructed to naturally mention " + vasEntries.length + " real operational pain points during the conversation, each one matching a specific Petpooja product. Here is the list, with the exact product each pain point maps to:\n" + vasList + "\n" +
+      "For EACH of these, determine from the transcript: did the rep notice when the prospect mentioned or hinted at that problem, and did they correctly connect it to the matching product and explain the benefit? Judge generously — the rep doesn't need to use the exact service name, just correctly identify the problem and offer a relevant solution. If the prospect never actually got a chance to mention a particular pain point in this conversation (the call may have ended early, or the topic never came up naturally), mark it as not identified but note in the comment that it wasn't raised, don't penalize the rep for something that was never surfaced.";
+  }
+
+  var stageLine = "";
+  if (scenario && Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0) {
+    var stageList = scenario.demo_stages.map(function (st, i) {
+      var cps = (st.checkpoints || []).filter(Boolean);
+      var cpText = cps.length > 0 ? " Must-cover points: " + cps.map(function (c) { return "\"" + c + "\""; }).join("; ") + "." : "";
+      return "Section " + (i + 1) + " - " + (st.title || "Untitled") + ": " + (st.brief || "") + cpText;
+    }).join("\n");
+    stageLine =
+      "This scenario also had a required sequence of pitch sections the rep was supposed to work through IN ORDER, each with specific must-cover points:\n" + stageList + "\n" +
+      "For EACH section, judge from the transcript whether the rep actually covered its must-cover points (their own wording is fine, exact phrasing not required) BEFORE the conversation moved on — and whether they followed the sections roughly in order rather than jumping around or skipping ahead. A rep who skips a section's points and moves on anyway should be marked as not fully covering that section, even if they circle back later. Judge process discipline here, not just whether the right words eventually got said somewhere in the call.";
+  }
+
   var schemaExample = {
     overall: "0-100",
     priority_action: "one specific actionable sentence",
@@ -60,6 +92,8 @@ export default async function handler(req, res) {
     strengths: ["short phrase", "short phrase"],
     improvements: ["short phrase", "short phrase", "short phrase"],
     parameter_scores: {},
+    vas_coverage: [],
+    stage_coverage: [],
     empathy_score: "0-100",
     adaptability_score: "0-100",
     ei_feedback: "one sentence",
@@ -70,6 +104,16 @@ export default async function handler(req, res) {
   PARAMETERS.forEach(function (p) {
     schemaExample.parameter_scores[p] = { score: "0-100", comment: "one sentence" };
   });
+  if (vasEntries.length > 0) {
+    schemaExample.vas_coverage = vasEntries.map(function (v) {
+      return { service_name: v.service_name, identified: "true or false", comment: "one short sentence on whether/how the rep caught this and pitched the right product" };
+    });
+  }
+  if (scenario && Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0) {
+    schemaExample.stage_coverage = scenario.demo_stages.map(function (st, i) {
+      return { section_title: st.title || ("Section " + (i + 1)), covered: "true or false", followed_order: "true or false", comment: "one short sentence" };
+    });
+  }
 
   var promptParts = [];
   promptParts.push("You are a senior sales trainer auditing a roleplay conversation for a restaurant-POS sales team.");
@@ -77,8 +121,20 @@ export default async function handler(req, res) {
   promptParts.push(previousLine);
   promptParts.push("Score the conversation strictly against these 7 audit parameters, each 0-100: " + PARAMETERS.join(", ") + ".");
   promptParts.push("If this was a full product demo session, weigh Product Knowledge and breadth of feature coverage heavily — a good demo should cover multiple product areas, not just one.");
+  if (vasLine) {
+    promptParts.push(vasLine);
+    promptParts.push("Let how well the rep handled these specific opportunities meaningfully influence your score for \"Mapping Customer Pain Points to Solutions\" in particular.");
+  }
+  if (stageLine) {
+    promptParts.push(stageLine);
+    promptParts.push("Let how well the rep followed this required sequence meaningfully influence your score for \"Overall Sales Readiness\" and \"Communication & Confidence\" — a rep who skips required ground and barrels ahead is not demonstrating real readiness, even if they eventually said the right things out of order.");
+  }
   promptParts.push("Be honest and specific - do not inflate scores. If the rep responded incoherently, off-topic, or in the wrong language for the context, scores should be very low and say so plainly.");
-  promptParts.push("Respond with ONLY a JSON object, no markdown, no code fences, matching exactly this shape (values are placeholders showing type/format, replace them with real content):");
+  var hasStages = scenario && Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0;
+  promptParts.push("Respond with ONLY a JSON object, no markdown, no code fences, matching exactly this shape (values are placeholders showing type/format, replace them with real content" +
+    (vasEntries.length > 0 ? "; vas_coverage must have exactly one entry per pain point listed above, same order" : "; omit vas_coverage or leave it as an empty array, this scenario has none") +
+    (hasStages ? "; stage_coverage must have exactly one entry per section listed above, same order" : "; omit stage_coverage or leave it as an empty array, this scenario has none") +
+    "):");
   promptParts.push(JSON.stringify(schemaExample));
   promptParts.push("Include at most 3 coachable_moments, the most instructive ones.");
   promptParts.push("Transcript:");
@@ -135,6 +191,23 @@ export default async function handler(req, res) {
       cleanParams[p] = { score: clamp(v.score), comment: String(v.comment || "").slice(0, 300) };
     });
 
+    var cleanVas = Array.isArray(r.vas_coverage) ? r.vas_coverage.slice(0, 15).map(function (v) {
+      return {
+        service_name: String(v.service_name || "").slice(0, 100),
+        identified: !!v.identified,
+        comment: String(v.comment || "").slice(0, 300),
+      };
+    }) : [];
+
+    var cleanStageCoverage = Array.isArray(r.stage_coverage) ? r.stage_coverage.slice(0, 15).map(function (v) {
+      return {
+        section_title: String(v.section_title || "").slice(0, 150),
+        covered: !!v.covered,
+        followed_order: !!v.followed_order,
+        comment: String(v.comment || "").slice(0, 300),
+      };
+    }) : [];
+
     var row = {
       user_id: gate.userId,
       scenario_id: scenarioId || null,
@@ -145,6 +218,8 @@ export default async function handler(req, res) {
       strengths: Array.isArray(r.strengths) ? r.strengths.slice(0, 6) : [],
       improvements: Array.isArray(r.improvements) ? r.improvements.slice(0, 6) : [],
       parameter_scores: cleanParams,
+      vas_coverage: cleanVas,
+      stage_coverage: cleanStageCoverage,
       coachable_moments: Array.isArray(r.coachable_moments) ? r.coachable_moments.slice(0, 3) : [],
       empathy_score: clamp(r.empathy_score),
       adaptability_score: clamp(r.adaptability_score),
