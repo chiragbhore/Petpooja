@@ -10,6 +10,12 @@ const MODES = [
   { value: "in_person", label: "In-Person Visit" },
   { value: "demo", label: "Full Product Demo" },
 ];
+const RESTAURANT_TYPES = [
+  { value: "", label: "None / not specific" },
+  { value: "dine_in", label: "Dine In Restaurant" },
+  { value: "qsr", label: "QSR Outlet" },
+  { value: "cloud_kitchen", label: "Cloud Kitchen" },
+];
 const VOICES = [
   { group: "Female", options: [
     { value: "Kore", label: "Kore - Firm, professional" },
@@ -28,12 +34,13 @@ const VOICES = [
     { value: "Algieba", label: "Algieba - Smooth, relaxed" },
   ]},
 ];
-const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "", account_name: "", assigned_to: "", demo_stages: [] };
+const blank = { title: "", difficulty: "Medium", category: "General", mode: "call", voice: "Kore", persona: "", product: "", traits: "", objections: "", goal: "", account_name: "", assigned_to: "", demo_stages: [], restaurant_type: "", selected_services: [] };
 
 export default function AdminScenarios() {
   const { loading, me } = useProfile("admin");
   const [scenarios, setScenarios] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [catalog, setCatalog] = useState([]);
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -46,6 +53,8 @@ export default function AdminScenarios() {
     setScenarios(data || []);
     const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("role", "employee").order("full_name", { ascending: true });
     setEmployees(emps || []);
+    const { data: cat } = await supabase.from("vas_catalog").select("*").order("sort_order", { ascending: true });
+    setCatalog(cat || []);
   };
   useEffect(() => { if (!loading) load(); }, [loading]);
 
@@ -56,7 +65,7 @@ export default function AdminScenarios() {
     const cleanStages = (form.demo_stages || [])
       .map((s) => ({ title: s.title || "", brief: s.brief || "", checkpoints: (s.checkpoints || []).map((c) => c.trim()).filter(Boolean) }))
       .filter((s) => s.title.trim() || s.brief.trim() || s.checkpoints.length > 0);
-    const payload = { ...form, assigned_to: form.assigned_to || null, demo_stages: cleanStages };
+    const payload = { ...form, assigned_to: form.assigned_to || null, demo_stages: cleanStages, restaurant_type: form.restaurant_type || null };
     delete payload.id;
 
     if (editingId) {
@@ -80,6 +89,8 @@ export default function AdminScenarios() {
       traits: s.traits || "", objections: s.objections || "", goal: s.goal || "",
       account_name: s.account_name || "", assigned_to: s.assigned_to || "",
       demo_stages: Array.isArray(s.demo_stages) ? s.demo_stages : [],
+      restaurant_type: s.restaurant_type || "",
+      selected_services: Array.isArray(s.selected_services) ? s.selected_services : [],
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -92,6 +103,17 @@ export default function AdminScenarios() {
     load();
   };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  // When restaurant type changes, drop any selected services that no longer belong to it
+  const setRestaurantType = (e) => {
+    const value = e.target.value;
+    const validNames = new Set(catalog.filter((c) => c.restaurant_type === value).map((c) => c.service_name));
+    setForm({ ...form, restaurant_type: value, selected_services: (form.selected_services || []).filter((n) => validNames.has(n)) });
+  };
+  const toggleService = (name) => {
+    const has = (form.selected_services || []).includes(name);
+    setForm({ ...form, selected_services: has ? form.selected_services.filter((n) => n !== name) : [...(form.selected_services || []), name] });
+  };
 
   // Pitch-stage helpers (Full Product Demo mode only)
   const addStage = () => setForm({ ...form, demo_stages: [...form.demo_stages, { title: `Section ${form.demo_stages.length + 1}`, brief: "", checkpoints: [""] }] });
@@ -120,6 +142,7 @@ export default function AdminScenarios() {
   };
 
   const modeLabel = (m) => (MODES.find((x) => x.value === m) || MODES[0]).label;
+  const restaurantLabel = (v) => (RESTAURANT_TYPES.find((x) => x.value === v) || {}).label || "";
   const voiceLabel = (v) => {
     for (const g of VOICES) { const found = g.options.find((o) => o.value === v); if (found) return found.value + " (" + g.group + ")"; }
     return v || "Kore";
@@ -130,6 +153,8 @@ export default function AdminScenarios() {
     (filterDiff === "all" || s.difficulty === filterDiff) &&
     (filterMode === "all" || (s.mode || "call") === filterMode)
   );
+
+  const servicesForType = catalog.filter((c) => c.restaurant_type === form.restaurant_type);
 
   if (loading) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
@@ -166,6 +191,10 @@ export default function AdminScenarios() {
                 <select value={form.category} onChange={set("category")}>
                   {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
                 </select></label>
+              <label className="field"><span>Restaurant type</span>
+                <select value={form.restaurant_type} onChange={setRestaurantType}>
+                  {RESTAURANT_TYPES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select></label>
               <label className="field"><span>Prospect persona</span><input value={form.persona} onChange={set("persona")} placeholder="Vikram, owner of a 30-seat cafe" /></label>
               <label className="field"><span>Product being sold</span><input value={form.product} onChange={set("product")} placeholder="an all-in-one POS system" /></label>
               <label className="field"><span>Personality traits</span><input value={form.traits} onChange={set("traits")} placeholder="friendly but time-poor" /></label>
@@ -178,6 +207,35 @@ export default function AdminScenarios() {
                   {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                 </select></label>
             </div>
+
+            {form.restaurant_type && (
+              <div style={{ marginTop: 8, marginBottom: 18, background: "var(--input-bg)", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Value-added services to bring into this pitch</div>
+                <p className="mini" style={{ marginBottom: 12 }}>
+                  Pick at least 5. The AI will bring up these specific operational pain points during the conversation and judge whether the rep spots the opportunity and pitches the right product — without ever naming the service or feeding the rep the answer.
+                </p>
+                {servicesForType.length === 0 ? (
+                  <div className="mini">No services in the catalog for this restaurant type yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {servicesForType.map((svc) => (
+                      <button
+                        key={svc.id}
+                        type="button"
+                        className={`chipbtn ${(form.selected_services || []).includes(svc.service_name) ? "on" : ""}`}
+                        onClick={() => toggleService(svc.service_name)}
+                        title={svc.problem_solved}
+                      >
+                        {(form.selected_services || []).includes(svc.service_name) ? "✓ " : ""}{svc.service_name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="mini" style={{ marginTop: 10 }}>
+                  {(form.selected_services || []).length} selected{(form.selected_services || []).length < 5 && servicesForType.length >= 5 ? " — aim for at least 5" : ""}
+                </div>
+              </div>
+            )}
 
             {form.mode === "demo" && (
               <div style={{ marginTop: 8, marginBottom: 18, background: "var(--input-bg)", borderRadius: 12, padding: 16 }}>
@@ -264,6 +322,12 @@ export default function AdminScenarios() {
                 <span className={"pill diff-" + s.difficulty}>{s.difficulty}</span>
               </div>
               <div className="mini" style={{ marginTop: 4 }}>{s.category || "General"} · {modeLabel(s.mode)}</div>
+              {s.restaurant_type && (
+                <div className="mini" style={{ marginTop: 4 }}>
+                  🏬 {restaurantLabel(s.restaurant_type)}
+                  {Array.isArray(s.selected_services) && s.selected_services.length > 0 ? ` · ${s.selected_services.length} services` : ""}
+                </div>
+              )}
               {(s.account_name || s.assigned_to) && (
                 <div className="mini" style={{ marginTop: 4, color: "var(--brand-700, var(--red-dark))" }}>
                   {s.account_name ? `📋 ${s.account_name}` : ""}
