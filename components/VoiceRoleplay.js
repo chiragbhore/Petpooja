@@ -33,7 +33,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const [speaking, setSpeaking] = useState(false);
   const [report, setReport] = useState(null);
   const [scoring, setScoring] = useState(false);
-  const [elapsed, setElapsed] = useState(0); // seconds since the call started
+  const [elapsed, setElapsed] = useState(0);
   const [reconnectingUI, setReconnectingUI] = useState(false);
 
   const sessionRef = useRef(null);
@@ -42,13 +42,13 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const streamRef = useRef(null);
   const procRef = useRef(null);
   const nextPlayRef = useRef(0);
-  const activeSourcesRef = useRef([]); // scheduled AI-voice buffers, so we can cut them off on interruption
-  const transcriptRef = useRef([]); // {role, text}
+  const activeSourcesRef = useRef([]);
+  const transcriptRef = useRef([]);
   const curInRef = useRef("");
   const curOutRef = useRef("");
   const recorderRef = useRef(null);
   const recChunksRef = useRef([]);
-  const recDestRef = useRef(null); // MediaStreamDestination mixing mic + prospect audio
+  const recDestRef = useRef(null);
   const tokenRef = useRef(null);
   const modelRef = useRef(null);
   const resumeHandleRef = useRef(null);
@@ -59,16 +59,13 @@ export default function VoiceRoleplay({ scenario, onClose }) {
   const timerRef = useRef(null);
   const callStartTimeRef = useRef(0);
   const userIdRef = useRef(null);
-  const lastAudioInRef = useRef(0); // timestamp of last audio chunk we actually sent
+  const lastAudioInRef = useRef(0);
 
   const authHeader = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     return { Authorization: `Bearer ${session?.access_token}`, "Content-Type": "application/json" };
   };
 
-  // Silently records what happened during the call to the database, so
-  // connection issues can be reviewed later without needing the employee
-  // to open dev tools. Never blocks the call or shows an error if it fails.
   const logEvent = (event, detail) => {
     const secs = callStartTimeRef.current ? Math.round((Date.now() - callStartTimeRef.current) / 1000) : 0;
     console.log("[PitchLab]", event, detail || "", "at", secs + "s");
@@ -123,30 +120,16 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     };
   };
 
-  // Called the instant Gemini tells us the rep started talking over the AI
-  // (a real "barge-in"). Immediately stops every bit of AI voice that was
-  // still queued to play, instead of letting it keep talking over the rep
-  // or picking the old sentence back up afterward.
   const stopPlaybackForInterruption = () => {
     activeSourcesRef.current.forEach((s) => { try { s.stop(); } catch {} });
     activeSourcesRef.current = [];
     if (outCtxRef.current) nextPlayRef.current = outCtxRef.current.currentTime;
     setSpeaking(false);
-    // The interrupted sentence never actually finished, so don't save a
-    // half-spoken line into the transcript.
     curOutRef.current = "";
   };
 
-  // Opens (or re-opens, via session resumption) the live connection to
-  // Gemini. Kept separate from mic/recording setup so we can silently
-  // reconnect mid-call without disturbing the user's mic stream or the
-  // in-progress recording.
-  // Called the moment Google warns us the connection is about to end
-  // (a "GoAway" notice, typically ~50s ahead of time). Swapping over here,
-  // ahead of the forced disconnect, avoids the few seconds of dead audio
-  // that happen if we just wait for the connection to actually die first.
   const proactiveReconnect = () => {
-    if (reconnectingRef.current) return; // already mid-reconnect, don't double up
+    if (reconnectingRef.current) return;
     reconnectingRef.current = true;
     setReconnectingUI(true);
     logEvent("reconnect_attempt", "proactive (GoAway warning)");
@@ -170,7 +153,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     console.log("[PitchLab] connectGemini() called - attempt #" + reconnectAttemptsRef.current + ", resumeHandle:", resumeHandleRef.current);
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: tokenRef.current, httpOptions: { apiVersion: "v1alpha" } });
-    let mySession = null; // set once connect() resolves below
+    let mySession = null;
 
     const session = await ai.live.connect({
       model: modelRef.current,
@@ -180,7 +163,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           reconnectAttemptsRef.current = 0;
         },
         onmessage: (msg) => {
-          const audio = msg.data; // concatenated inline audio (base64) if present
+          const audio = msg.data;
           if (audio) playChunk(audio);
           const sc = msg.serverContent;
           if (sc?.interrupted) {
@@ -203,7 +186,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           }
         },
         onerror: (e) => {
-          if (sessionRef.current && sessionRef.current !== mySession) return; // stale, already replaced
+          if (sessionRef.current && sessionRef.current !== mySession) return;
           logEvent("error", e?.message || e);
           if (intentionallyClosedRef.current) return;
           setError(e?.message || "Connection error. The free voice line may be busy - try again in a moment.");
@@ -211,10 +194,10 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           cleanup();
         },
         onclose: (ev) => {
-          if (sessionRef.current && sessionRef.current !== mySession) return; // stale, already replaced
+          if (sessionRef.current && sessionRef.current !== mySession) return;
           logEvent("connection_closed", ev?.reason || "");
           if (intentionallyClosedRef.current) return;
-          if (reconnectingRef.current) return; // a reconnect (e.g. from GoAway) is already underway
+          if (reconnectingRef.current) return;
           if (reconnectAttemptsRef.current >= 5) {
             logEvent("reconnect_giveup", "5 attempts exhausted");
             setError("Lost the connection and couldn't reconnect. Please end the call and start a new one.");
@@ -265,7 +248,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       const { data: { session: authSession } } = await supabase.auth.getSession();
       userIdRef.current = authSession?.user?.id || null;
       logEvent("call_start");
-      // 1) get a short-lived token from our server
+
       const res = await fetch("/api/live-token", {
         method: "POST", headers: await authHeader(), body: JSON.stringify({ scenarioId: scenario.id }),
       });
@@ -274,7 +257,6 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       tokenRef.current = json.token;
       modelRef.current = json.model;
 
-      // 2) connect to Gemini Live with the token
       const outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
       outCtxRef.current = outCtx;
       nextPlayRef.current = 0;
@@ -284,7 +266,6 @@ export default function VoiceRoleplay({ scenario, onClose }) {
       const session = await connectGemini();
       sessionRef.current = session;
 
-      // 3) capture microphone -> stream PCM16 @ 16kHz
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const inCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
@@ -300,20 +281,16 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         try {
           sessionRef.current.sendRealtimeInput({ audio: { data: b64, mimeType: "audio/pcm;rate=16000" } });
           lastAudioInRef.current = Date.now();
-        } catch (sendErr) {
-          console.log("[PitchLab] sendRealtimeInput threw:", sendErr?.message || sendErr);
-        }
+        } catch {}
       };
       source.connect(proc);
       proc.connect(inCtx.destination);
 
-      // mix the rep's mic into the same recording as the prospect's voice
       try {
         const micSrc = outCtx.createMediaStreamSource(stream);
         micSrc.connect(recDest);
       } catch {}
 
-      // start recording the mixed call audio
       try {
         recChunksRef.current = [];
         const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
@@ -323,23 +300,9 @@ export default function VoiceRoleplay({ scenario, onClose }) {
         recorderRef.current = recorder;
       } catch {}
 
-      // Some browsers quietly "suspend" audio contexts on long-running tabs
-      // to save power - this can silently stop mic capture and playback
-      // with zero errors, looking exactly like a dead call. This checks
-      // every 15s and forces both audio contexts back to running, and logs
-      // if the mic ever goes more than 5s without sending a chunk.
       keepAliveRef.current = setInterval(() => {
-        if (inCtxRef.current && inCtxRef.current.state !== "running") {
-          console.log("[PitchLab] Input AudioContext was", inCtxRef.current.state, "- resuming it.");
-          inCtxRef.current.resume().catch(() => {});
-        }
-        if (outCtxRef.current && outCtxRef.current.state !== "running") {
-          console.log("[PitchLab] Output AudioContext was", outCtxRef.current.state, "- resuming it.");
-          outCtxRef.current.resume().catch(() => {});
-        }
-        if (lastAudioInRef.current && Date.now() - lastAudioInRef.current > 5000) {
-          console.log("[PitchLab] No mic audio sent in the last 5+ seconds - mic pipeline may have stalled.");
-        }
+        if (inCtxRef.current && inCtxRef.current.state !== "running") inCtxRef.current.resume().catch(() => {});
+        if (outCtxRef.current && outCtxRef.current.state !== "running") outCtxRef.current.resume().catch(() => {});
       }, 15000);
 
       timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -353,7 +316,6 @@ export default function VoiceRoleplay({ scenario, onClose }) {
 
   const end = async () => {
     logEvent("call_ended_by_user");
-    // grab the recorder's final chunk before we tear everything down
     let blob = null;
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       blob = await new Promise((resolve) => {
@@ -369,12 +331,11 @@ export default function VoiceRoleplay({ scenario, onClose }) {
     if (curOutRef.current.trim()) transcriptRef.current.push({ role: "PROSPECT", text: curOutRef.current.trim() });
 
     const transcript = transcriptRef.current.map((t) => `${t.role}: ${t.text}`).join("\n");
-    if (transcript.length < 20) return; // nothing to score
+    if (transcript.length < 20) return;
 
     setScoring(true);
     try {
       const headers = await authHeader();
-
       let uploadPromise = Promise.resolve(null);
       if (blob && blob.size > 0) {
         uploadPromise = (async () => {
@@ -427,9 +388,7 @@ export default function VoiceRoleplay({ scenario, onClose }) {
           <b>{scenario.title}</b>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {(state === "connecting" || state === "live") && (
-              <span className="pill red" style={{ fontVariantNumeric: "tabular-nums" }}>
-                ⏱ {formatDuration(elapsed)}
-              </span>
+              <span className="pill red" style={{ fontVariantNumeric: "tabular-nums" }}>⏱ {formatDuration(elapsed)}</span>
             )}
             <span style={{ cursor: "pointer", color: "#9aa0aa" }} onClick={() => { cleanup(); onClose(); }}>✕</span>
           </div>
@@ -449,6 +408,38 @@ export default function VoiceRoleplay({ scenario, onClose }) {
               <div className="tile" style={{ marginBottom: 12 }}>
                 <div className="kpi-label">Progress Note</div>
                 <div style={{ fontSize: 13, marginTop: 4 }}>{report.progress_note}</div>
+              </div>
+            )}
+
+            {report.vas_coverage?.length > 0 && (
+              <div className="tile" style={{ marginBottom: 12 }}>
+                <div className="kpi-label">Opportunity Coverage</div>
+                <div className="mini" style={{ marginBottom: 6 }}>Did the rep catch these real operational pain points and pitch the right product?</div>
+                {report.vas_coverage.map((v, i) => (
+                  <div key={i} className="row-between" style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid var(--line)" : "none" }}>
+                    <div style={{ fontSize: 13 }}>
+                      <b>{v.service_name}</b> — <span className="mini">{v.comment}</span>
+                    </div>
+                    <span className={`pill ${v.identified ? "" : "gray"}`} style={v.identified ? { background: "#e8f6ee", color: "#15803d" } : {}}>
+                      {v.identified ? "✓ Caught" : "Missed"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {report.stage_coverage?.length > 0 && (
+              <div className="tile" style={{ marginBottom: 12 }}>
+                <div className="kpi-label">Process Adherence</div>
+                <div className="mini" style={{ marginBottom: 6 }}>Did the rep cover each required pitch section, in order, before moving on?</div>
+                {report.stage_coverage.map((v, i) => (
+                  <div key={i} className="row-between" style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid var(--line)" : "none" }}>
+                    <div style={{ fontSize: 13 }}><b>{v.section_title}</b> — <span className="mini">{v.comment}</span></div>
+                    <span className={`pill ${v.covered ? "" : "gray"}`} style={v.covered ? { background: "#e8f6ee", color: "#15803d" } : {}}>
+                      {v.covered ? (v.followed_order ? "✓ Covered" : "✓ Covered (out of order)") : "Missed"}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
 
