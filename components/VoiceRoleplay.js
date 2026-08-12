@@ -415,6 +415,11 @@ export default function VoiceRoleplay({ scenario, onClose }) {
               <div className="tile" style={{ marginBottom: 12 }}>
                 <div className="kpi-label">Opportunity Coverage</div>
                 <div className="mini" style={{ marginBottom: 6 }}>Did the rep catch these real operational pain points and pitch the right product?</div>
+{report.vas_coverage.filter(v => !v.identified).length > 0 && (
+                    <div className="mini" style={{ marginBottom: 8, fontWeight: 700, color: "var(--red-dark)" }}>
+                      {report.vas_coverage.filter(v => !v.identified).length} of {report.vas_coverage.length} services not explained: {report.vas_coverage.filter(v => !v.identified).map(v => v.service_name).join(", ")}
+                    </div>
+                  )}
                 {report.vas_coverage.map((v, i) => (
                   <div key={i} className="row-between" style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid var(--line)" : "none" }}>
                     <div style={{ fontSize: 13 }}>
