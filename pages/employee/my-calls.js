@@ -87,6 +87,11 @@ export default function MyCalls() {
                 <div className="tile" style={{ marginBottom: 12 }}>
                   <div className="kpi-label">Opportunity Coverage</div>
                   <div className="mini" style={{ marginBottom: 6 }}>Did you catch these real operational pain points and pitch the right product?</div>
+{open.vas_coverage.filter(v => !v.identified).length > 0 && (
+                    <div className="mini" style={{ marginBottom: 8, fontWeight: 700, color: "var(--red-dark)" }}>
+                      {open.vas_coverage.filter(v => !v.identified).length} of {open.vas_coverage.length} services not explained: {open.vas_coverage.filter(v => !v.identified).map(v => v.service_name).join(", ")}
+                    </div>
+                  )}
                   {open.vas_coverage.map((v, i) => (
                     <div key={i} className="row-between" style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid var(--line)" : "none" }}>
                       <div style={{ fontSize: 13 }}><b>{v.service_name}</b> — <span className="mini">{v.comment}</span></div>
