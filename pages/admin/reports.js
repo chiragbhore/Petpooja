@@ -1,3 +1,4 @@
+import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
@@ -7,9 +8,11 @@ const PAGE_SIZE = 10;
 
 export default function AdminReports() {
   const { loading, me } = useProfile("admin");
+  const router = useRouter();
   const [calls, setCalls] = useState([]);
   const [employees, setEmployees] = useState({});
   const [scenarios, setScenarios] = useState({});
+  const [searchText, setSearchText] = useState("");
   const [filterEmp, setFilterEmp] = useState("all");
   const [scoreFilter, setScoreFilter] = useState("all"); // all | high | mid | low
   const [dateFrom, setDateFrom] = useState("");
@@ -44,7 +47,7 @@ export default function AdminReports() {
   };
 
   // reset to page 1 whenever a filter changes, so you never land on an empty page
-  useEffect(() => { setPage(1); }, [filterEmp, scoreFilter, sortBy, dateFrom, dateTo]);
+  useEffect(() => { setPage(1); }, [filterEmp, scoreFilter, sortBy, dateFrom, dateTo, searchText]);
 
   const inScoreBand = (score) => {
     if (scoreFilter === "all") return true;
@@ -65,7 +68,8 @@ export default function AdminReports() {
   const filtered = calls
     .filter((c) => filterEmp === "all" || c.user_id === filterEmp)
     .filter((c) => inScoreBand(c.overall || 0))
-    .filter((c) => inDateRange(c.created_at));
+    .filter((c) => inDateRange(c.created_at))
+    .filter((c) => !searchText.trim() || (employees[c.user_id] || "").toLowerCase().includes(searchText.trim().toLowerCase()));
 
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === "score_desc") return (b.overall || 0) - (a.overall || 0);
@@ -102,8 +106,13 @@ export default function AdminReports() {
     <div className="shell">
       <Sidebar role="admin" me={me} />
       <main className="content">
-        <h1 className="page">Call reports</h1>
-        <p className="sub">Every roleplay call across your team, with the full AI pitch report.</p>
+        <div className="row-between" style={{ marginBottom: 4, alignItems: "flex-start" }}>
+          <div>
+            <h1 className="page">Call reports</h1>
+            <p className="sub">Every roleplay call across your team, with the full AI pitch report.</p>
+          </div>
+          <button className="btn dark" onClick={() => router.push("/admin/improvements")}>📈 View Areas of Improvement</button>
+        </div>
 
         <div className="grid3" style={{ marginBottom: 16 }}>
           <div className="tile"><div className="kpi">{filtered.length}</div><div className="kpi-label">Calls</div></div>
@@ -112,6 +121,10 @@ export default function AdminReports() {
         </div>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+          <label className="field" style={{ maxWidth: 240, marginBottom: 0 }}>
+            <span>🔍 Search employee</span>
+            <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Type a name…" />
+          </label>
           <label className="field" style={{ maxWidth: 220, marginBottom: 0 }}>
             <span>Filter by employee</span>
             <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>

@@ -13,6 +13,7 @@ export default function AreasOfImprovement() {
   const [employees, setEmployees] = useState([]);
   const [calls, setCalls] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [searchText, setSearchText] = useState("");
 
   useEffect(() => {
     if (loading) return;
@@ -84,11 +85,15 @@ export default function AreasOfImprovement() {
         ) : (
           <div className="dash">
             <div className="stack">
+              <label className="field" style={{ maxWidth: 260 }}>
+                <span>🔍 Search employee</span>
+                <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Type a name…" />
+              </label>
               <div className="card">
                 <table className="table">
                   <thead><tr><th>Employee</th><th>Avg score</th><th>Calls</th><th>Weakest area</th></tr></thead>
                   <tbody>
-                    {summaries.map((s) => (
+                    {summaries.filter((s) => !searchText.trim() || s.employee.full_name.toLowerCase().includes(searchText.trim().toLowerCase())).map((s) => (
                       <tr
                         key={s.employee.id}
                         onClick={() => setSelected(s.employee.id)}
