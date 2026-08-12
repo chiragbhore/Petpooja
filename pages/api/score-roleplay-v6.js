@@ -127,7 +127,7 @@ export default async function handler(req, res) {
   promptParts.push("If this was a full product demo session, weigh Product Knowledge and breadth of feature coverage heavily — a good demo should cover multiple product areas, not just one.");
   if (vasLine) {
     promptParts.push(vasLine);
-    promptParts.push("Let how well the rep handled these specific opportunities meaningfully influence your score for \"Mapping Customer Pain Points to Solutions\" in particular.");
+    promptParts.push("This is a hard rule, not a soft suggestion: count how many of the listed pain points the rep actually identified (vas_coverage identified=true) versus the total listed. If they identified fewer than half, the \"Mapping Customer Pain Points to Solutions\" score MUST be 50 or below, no matter how good the rest of the call was — missing most of the real opportunities in front of them is a genuine discovery failure and the score must reflect that, not be softened by good rapport or communication elsewhere in the call. If they identified more than half but not all, score it in the 55-75 range depending on quality. Only score above 75 if nearly all points were caught. Also make sure your \"overall\" score is not inflated beyond what this and the other parameter scores would reasonably average out to — do not let a strong opening or good tone pull the overall score up if a core skill area scored low.");
   }
   if (stageLine) {
     promptParts.push(stageLine);
@@ -141,6 +141,7 @@ export default async function handler(req, res) {
     "):");
   promptParts.push(JSON.stringify(schemaExample));
   promptParts.push("Include at most 3 coachable_moments, the most instructive ones.");
+  promptParts.push("Keep every comment field in vas_coverage and stage_coverage to 10 words or fewer — these need to stay short since there can be many entries. Do not pad or explain at length; a terse phrase is enough.");
   promptParts.push("Transcript:");
   promptParts.push(transcript);
 
@@ -158,7 +159,7 @@ export default async function handler(req, res) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 4096, temperature: 0.3 },
+            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0.3 },
           }),
         });
         var data = await gRes.json();
