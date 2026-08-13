@@ -2,39 +2,55 @@ import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 import ThemeToggle from "./ThemeToggle";
 
-const ICONS = {
-  Overview: "🏠", Dashboard: "🏠",
-  Courses: "📚", Roleplay: "🎤", "Roleplays": "🎯",
-  Assessments: "📝", "Knowledge Base": "🧠",
-  "Call Reports": "📈", "My Calls": "🎧",
-  Classroom: "📅", Team: "👥",
-};
+// Content areas admins/trainers can reach, and the permission key each
+// one is gated by. Trainers only see links they've been granted.
+const STAFF_LINKS = [
+  ["/admin/courses", "Courses", "courses"],
+  ["/admin/scenarios", "Roleplays", "scenarios"],
+  ["/admin/quizzes", "Assessments", "quizzes"],
+  ["/admin/knowledge", "Knowledge Base", "knowledge"],
+  ["/admin/classroom", "Classroom", "classroom"],
+];
+
+const REPORT_LINKS = [
+  ["/admin/reports", "Call Reports", "reports"],
+  ["/admin/improvements", "Areas of Improvement", "reports"],
+  ["/admin/roleplay-coverage-report", "Roleplay Coverage", "reports"],
+];
 
 export default function Sidebar({ role, me }) {
   const router = useRouter();
   const path = router.pathname;
 
-  const links =
-    role === "admin"
-      ? [
-          ["/admin", "Overview"],
-          ["/admin/courses", "Courses"],
-          ["/admin/scenarios", "Roleplays"],
-          ["/admin/quizzes", "Assessments"],
-          ["/admin/knowledge", "Knowledge Base"],
-          ["/admin/reports", "Call Reports"],
-          ["/admin/classroom", "Classroom"],
-          ["/admin/employees", "Team"],
-        ]
-      : [
-          ["/employee", "Dashboard"],
-          ["/employee/courses", "Courses"],
-          ["/employee/roleplay", "Roleplay"],
-          ["/employee/my-calls", "My Calls"],
-          ["/employee/classroom", "Classroom"],
-        ];
+  let groups; // [{ label: string|null, links: [[href, label]] }]
+  if (role === "admin") {
+    groups = [
+      { label: null, links: [["/admin", "Overview"]] },
+      { label: "Training", links: STAFF_LINKS.map(([h, l]) => [h, l]) },
+      { label: "Reports", links: REPORT_LINKS.map(([h, l]) => [h, l]) },
+      { label: null, links: [["/admin/employees", "Team"]] },
+    ];
+  } else if (role === "trainer") {
+    const perms = me?.permissions || {};
+    groups = [
+      { label: null, links: [["/trainer", "Overview"]] },
+      { label: "Training", links: STAFF_LINKS.filter(([, , key]) => perms[key]).map(([h, l]) => [h, l]) },
+      { label: "Reports", links: REPORT_LINKS.filter(([, , key]) => perms[key]).map(([h, l]) => [h, l]) },
+    ];
+  } else {
+    groups = [
+      { label: null, links: [
+        ["/employee", "Dashboard"],
+        ["/employee/courses", "Courses"],
+        ["/employee/roleplay", "Roleplay"],
+        ["/employee/my-calls", "My Calls"],
+        ["/employee/improvements", "My Improvement"],
+        ["/employee/classroom", "Classroom"],
+      ] },
+    ];
+  }
 
-  const isActive = (href) => path === href || (href !== "/admin" && href !== "/employee" && path.startsWith(href));
+  const isActive = (href) => path === href || (!["/admin", "/employee", "/trainer"].includes(href) && path.startsWith(href));
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -43,39 +59,48 @@ export default function Sidebar({ role, me }) {
 
   return (
     <aside className="sidebar">
-      <div className="sb-brand">
-        <img src="/petpooja.png" alt="Petpooja" style={{ width: 38, height: 38, objectFit: "contain", background: "#fff", borderRadius: 10, padding: 4 }} />
-        <div className="sb-brand-name">PitchLab<span>Sales Pitch Practice</span></div>
+      <div className="row-between" style={{ padding: "0 5px" }}>
+        <img src="/petpooja.png" alt="Petpooja" className="brand-logo" />
+        <ThemeToggle />
       </div>
+      <div className="brand-sub" style={{ padding: "0 5px" }}><b>PitchLab</b> · Sales Training</div>
 
-      <nav className="sb-nav">
-        {links.map(([href, label]) => (
-          <a
-            key={href}
-            className={`sb-link ${isActive(href) ? "active" : ""}`}
-            onClick={() => router.push(href)}
-          >
-            <span>{ICONS[label] || "•"}</span> {label}
-          </a>
+      <nav className="nav">
+        {groups.map((g, gi) => (
+          <div key={gi}>
+            {g.label && (
+              <div className="mini" style={{ textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, padding: "12px 8px 4px", opacity: 0.65 }}>
+                {g.label}
+              </div>
+            )}
+            {g.links.map(([href, label]) => (
+              <a
+                key={href}
+                href={href}
+                className={isActive(href) ? "active" : ""}
+                onClick={(e) => { e.preventDefault(); router.push(href); }}
+              >
+                {label}
+              </a>
+            ))}
+          </div>
         ))}
       </nav>
 
       <div className="spacer" />
 
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
-        <ThemeToggle />
-      </div>
-
-      <div className="sb-user">
-        <div className="avatar">
-          {(me?.full_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me?.full_name}</div>
-          <div className="mini" style={{ textTransform: "capitalize" }}>{role}</div>
+      <div className="row-between" style={{ padding: "8px 6px" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+          <div className="avatar">
+            {(me?.full_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+          </div>
+          <div className="stack" style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{me?.full_name}</div>
+            <div className="mini" style={{ textTransform: "capitalize" }}>{role}</div>
+          </div>
         </div>
       </div>
-      <button className="btn ghost full" onClick={logout} style={{ marginTop: 8 }}>Log out</button>
+      <button className="btn ghost full" onClick={logout} style={{ marginTop: 6 }}>Log out</button>
     </aside>
   );
 }
