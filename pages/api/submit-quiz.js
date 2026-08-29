@@ -29,6 +29,7 @@ async function gradeOneScreenshotQuestion(question, submittedPaths) {
     const b64 = await downloadAsBase64("quiz-screenshots", path);
     if (b64) submittedImages.push({ path, base64: b64 });
   }
+  console.log("[quiz-grading] question:", question.id, "submitted paths given:", (submittedPaths || []).length, "successfully downloaded:", submittedImages.length);
   if (submittedImages.length === 0) return { correct: false, feedback: "No screenshot was submitted for this question." };
 
   const referencePaths = Array.isArray(question.reference_images) ? question.reference_images.slice(0, 5) : [];
@@ -37,6 +38,7 @@ async function gradeOneScreenshotQuestion(question, submittedPaths) {
     const b64 = await downloadAsBase64("quiz-reference-images", path);
     if (b64) referenceImages.push({ path, base64: b64 });
   }
+  console.log("[quiz-grading] question:", question.id, "reference paths given:", referencePaths.length, "successfully downloaded:", referenceImages.length, "has answer_guide:", !!question.answer_guide);
 
   const parts = [];
   const introText = [
@@ -86,7 +88,17 @@ async function gradeOneScreenshotQuestion(question, submittedPaths) {
 
   try {
     const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-    return { correct: !!parsed.correct, feedback: String(parsed.feedback || "").slice(0, 400) };
+    // Same class of bug we fixed once before: !!value treats the literal
+    // STRING "false" as true (any non-empty string is truthy). Parse the
+    // actual meaning instead of just checking whether something was sent.
+    const toBool = (v) => {
+      if (typeof v === "boolean") return v;
+      if (typeof v === "string") { const s = v.trim().toLowerCase(); return s === "true" || s === "yes" || s === "1"; }
+      return !!v;
+    };
+    const finalCorrect = toBool(parsed.correct);
+    console.log("[quiz-grading] question:", question.id, "raw AI response:", text.slice(0, 300), "parsed correct:", finalCorrect);
+    return { correct: finalCorrect, feedback: String(parsed.feedback || "").slice(0, 400) };
   } catch {
     return { correct: false, feedback: "Could not be reviewed automatically — needs admin attention." };
   }
