@@ -9,13 +9,17 @@ export default function QuizReview() {
   const [employees, setEmployees] = useState({});
   const [quizzes, setQuizzes] = useState({});
   const [open, setOpen] = useState(null); // attempt being reviewed
+  const [pendingCount, setPendingCount] = useState(0);
   const [overrides, setOverrides] = useState({}); // questionId -> boolean
   const [imageUrls, setImageUrls] = useState({}); // path -> signed url
   const [finalizing, setFinalizing] = useState(false);
 
+  const [tab, setTab] = useState("pending");
+
   const load = async () => {
-    const [{ data: att }, { data: emps }, { data: qz }] = await Promise.all([
+    const [{ data: pending }, { data: completed }, { data: emps }, { data: qz }] = await Promise.all([
       supabase.from("quiz_attempts").select("*").eq("status", "pending_review").order("submitted_at", { ascending: true }),
+      supabase.from("quiz_attempts").select("*").eq("status", "completed").order("submitted_at", { ascending: false }).limit(100),
       supabase.from("profiles").select("id, full_name").eq("role", "employee"),
       supabase.from("quizzes").select("id, title"),
     ]);
@@ -23,9 +27,10 @@ export default function QuizReview() {
     const qzMap = {}; (qz || []).forEach((q) => { qzMap[q.id] = q.title; });
     setEmployees(empMap);
     setQuizzes(qzMap);
-    setAttempts(att || []);
+    setAttempts(tab === "pending" ? (pending || []) : (completed || []));
+    setPendingCount((pending || []).length);
   };
-  useEffect(() => { if (!loading) load(); }, [loading]);
+  useEffect(() => { if (!loading) load(); }, [loading, tab]);
 
   const openAttempt = async (attempt) => {
     setOpen(attempt);
@@ -84,11 +89,16 @@ export default function QuizReview() {
         <h1 className="page">Assessment review</h1>
         <p className="sub">Screenshot answers the AI has graded, waiting on your final sign-off before the employee sees a score.</p>
 
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button className={`chipbtn ${tab === "pending" ? "on" : ""}`} onClick={() => setTab("pending")}>Pending review{pendingCount > 0 ? ` (${pendingCount})` : ""}</button>
+          <button className={`chipbtn ${tab === "completed" ? "on" : ""}`} onClick={() => setTab("completed")}>Completed scores</button>
+        </div>
+
         <div className="card">
           <table className="table">
-            <thead><tr><th>Employee</th><th>Assessment</th><th>Submitted</th><th>AI preliminary score</th><th></th></tr></thead>
+            <thead><tr><th>Employee</th><th>Assessment</th><th>Submitted</th><th>{tab === "pending" ? "AI preliminary score" : "Final score"}</th><th></th></tr></thead>
             <tbody>
-              {attempts.length === 0 && <tr><td colSpan={5} className="mini" style={{ padding: 20 }}>Nothing waiting on review right now.</td></tr>}
+              {attempts.length === 0 && <tr><td colSpan={5} className="mini" style={{ padding: 20 }}>{tab === "pending" ? "Nothing waiting on review right now." : "No completed assessments yet."}</td></tr>}
               {attempts.map((a) => (
                 <tr key={a.id}>
                   <td><b>{employees[a.user_id] || "—"}</b></td>
