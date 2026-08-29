@@ -21,6 +21,59 @@ async function requireUser(req) {
   return { userId: data.user.id };
 }
 
+function toBool(v) {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") {
+    var s = v.trim().toLowerCase();
+    return s === "true" || s === "yes" || s === "1";
+  }
+  return !!v;
+}
+
+// Calls Gemini once and returns the raw text, trying each model in
+// GEMINI_MODELS in turn until one responds.
+async function callGeminiOnce(prompt) {
+  var lastErr = null;
+  for (var i = 0; i < GEMINI_MODELS.length; i++) {
+    var model = GEMINI_MODELS[i];
+    try {
+      var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + process.env.GEMINI_API_KEY;
+      var gRes = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0.3 },
+        }),
+      });
+      var data = await gRes.json();
+      if (!gRes.ok) throw new Error((data && data.error && data.error.message) || ("Gemini error (" + gRes.status + ")"));
+      var candidate = data.candidates && data.candidates[0];
+      var text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+      if (text) return text;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("No Gemini model responded.");
+}
+
+function tryParseJson(text) {
+  var cleaned = text.replace(/```json|```/g, "").trim();
+  try {
+    return { ok: true, data: JSON.parse(cleaned) };
+  } catch (parseErr) {
+    var start = cleaned.indexOf("{");
+    var end = cleaned.lastIndexOf("}");
+    if (start !== -1 && end !== -1 && end > start) {
+      try { return { ok: true, data: JSON.parse(cleaned.slice(start, end + 1)) }; }
+      catch (secondErr) { /* fall through */ }
+    }
+    return { ok: false, snippet: cleaned.slice(0, 300) };
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: "Missing GEMINI_API_KEY." });
@@ -51,10 +104,8 @@ export default async function handler(req, res) {
     previousLine = "The rep's PREVIOUS call scored " + previous.overall + "/100. Their prior weak areas: " + JSON.stringify(previous.improvements) + ". Prior summary: " + JSON.stringify(previous.executive_summary) + ".";
   }
 
-  // Fetch the operational pain points this scenario was set up to surface.
-  // If specific services were hand-picked, grade against just those.
-  // Otherwise, as long as a restaurant type is set, grade against every
-  // catalog service for that type.
+  // Pain points this scenario was set up to surface (from the restaurant
+  // type's service catalog), so we can grade discovery skill specifically.
   var vasEntries = [];
   if (scenario && scenario.restaurant_type) {
     var vasQuery = supabaseAdmin
@@ -73,7 +124,7 @@ export default async function handler(req, res) {
     var vasList = vasEntries.map(function (v) { return "- " + v.service_name + ": the prospect was scripted to be frustrated about \"" + v.problem_solved + "\""; }).join("\n");
     vasLine =
       "This scenario was specifically set up to test discovery skill: the prospect was instructed to naturally mention " + vasEntries.length + " real operational pain points during the conversation, each one matching a specific Petpooja product. Here is the list, with the exact product each pain point maps to:\n" + vasList + "\n" +
-      "For EACH of these, determine from the transcript: did the rep notice when the prospect mentioned or hinted at that problem, and did they correctly connect it to the matching product and explain the benefit? Judge generously — the rep doesn't need to use the exact service name, just correctly identify the problem and offer a relevant solution. If the prospect never actually got a chance to mention a particular pain point in this conversation (the call may have ended early, or the topic never came up naturally), mark it as not identified but note in the comment that it wasn't raised, don't penalize the rep for something that was never surfaced.";
+      "For EACH of these, determine from the transcript: did the rep notice when the prospect mentioned or hinted at that problem, and did they correctly connect it to the matching product and explain the benefit? Judge generously — the rep doesn't need to use the exact service name, just correctly identify the problem and offer a relevant solution. If the prospect never actually got a chance to mention a particular pain point in this conversation, mark it as not identified but note in the comment that it wasn't raised, don't penalize the rep for something that was never surfaced.";
   }
 
   var stageLine = "";
@@ -87,6 +138,9 @@ export default async function handler(req, res) {
       "This scenario also had a required sequence of pitch sections the rep was supposed to work through IN ORDER, each with specific must-cover points:\n" + stageList + "\n" +
       "For EACH section, judge from the transcript whether the rep actually covered its must-cover points (their own wording is fine, exact phrasing not required) BEFORE the conversation moved on — and whether they followed the sections roughly in order rather than jumping around or skipping ahead. A rep who skips a section's points and moves on anyway should be marked as not fully covering that section, even if they circle back later. Judge process discipline here, not just whether the right words eventually got said somewhere in the call.";
   }
+
+  var hasVas = vasEntries.length > 0;
+  var hasStages = scenario && Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0;
 
   var schemaExample = {
     overall: "0-100",
@@ -108,14 +162,14 @@ export default async function handler(req, res) {
   PARAMETERS.forEach(function (p) {
     schemaExample.parameter_scores[p] = { score: "0-100", comment: "one sentence" };
   });
-  if (vasEntries.length > 0) {
+  if (hasVas) {
     schemaExample.vas_coverage = vasEntries.map(function (v) {
-      return { service_name: v.service_name, identified: "true or false", comment: "one short sentence on whether/how the rep caught this and pitched the right product" };
+      return { service_name: v.service_name, identified: false, comment: "one short sentence on whether/how the rep caught this and pitched the right product" };
     });
   }
-  if (scenario && Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0) {
+  if (hasStages) {
     schemaExample.stage_coverage = scenario.demo_stages.map(function (st, i) {
-      return { section_title: st.title || ("Section " + (i + 1)), covered: "true or false", followed_order: "true or false", comment: "one short sentence" };
+      return { section_title: st.title || ("Section " + (i + 1)), covered: false, followed_order: false, comment: "one short sentence" };
     });
   }
 
@@ -127,67 +181,47 @@ export default async function handler(req, res) {
   promptParts.push("If this was a full product demo session, weigh Product Knowledge and breadth of feature coverage heavily — a good demo should cover multiple product areas, not just one.");
   if (vasLine) {
     promptParts.push(vasLine);
-    promptParts.push("This is a hard rule, not a soft suggestion: count how many of the listed pain points the rep actually identified (vas_coverage identified=true) versus the total listed. If they identified fewer than half, the \"Mapping Customer Pain Points to Solutions\" score MUST be 50 or below, no matter how good the rest of the call was — missing most of the real opportunities in front of them is a genuine discovery failure and the score must reflect that, not be softened by good rapport or communication elsewhere in the call. If they identified more than half but not all, score it in the 55-75 range depending on quality. Only score above 75 if nearly all points were caught. Also make sure your \"overall\" score is not inflated beyond what this and the other parameter scores would reasonably average out to — do not let a strong opening or good tone pull the overall score up if a core skill area scored low.");
+    promptParts.push("This is a hard rule, not a soft suggestion: count how many of the listed pain points the rep actually identified (vas_coverage identified=true) versus the total listed. If they identified fewer than half, the \"Mapping Customer Pain Points to Solutions\" score MUST be 50 or below, no matter how good the rest of the call was. If they identified more than half but not all, score it in the 55-75 range depending on quality. Only score above 75 if nearly all points were caught. Also make sure your \"overall\" score is not inflated beyond what this and the other parameter scores would reasonably average out to.");
   }
   if (stageLine) {
     promptParts.push(stageLine);
-    promptParts.push("Let how well the rep followed this required sequence meaningfully influence your score for \"Overall Sales Readiness\" and \"Communication & Confidence\" — a rep who skips required ground and barrels ahead is not demonstrating real readiness, even if they eventually said the right things out of order.");
+    promptParts.push("Let how well the rep followed this required sequence meaningfully influence your score for \"Overall Sales Readiness\" and \"Communication & Confidence\".");
   }
   promptParts.push("Be honest and specific - do not inflate scores. If the rep responded incoherently, off-topic, or in the wrong language for the context, scores should be very low and say so plainly.");
-  var hasStages = scenario && Array.isArray(scenario.demo_stages) && scenario.demo_stages.length > 0;
   promptParts.push("Respond with ONLY a JSON object, no markdown, no code fences, matching exactly this shape (values are placeholders showing type/format, replace them with real content" +
-    (vasEntries.length > 0 ? "; vas_coverage must have exactly one entry per pain point listed above, same order" : "; omit vas_coverage or leave it as an empty array, this scenario has none") +
+    (hasVas ? "; vas_coverage must have exactly one entry per pain point listed above, same order" : "; omit vas_coverage or leave it as an empty array, this scenario has none") +
     (hasStages ? "; stage_coverage must have exactly one entry per section listed above, same order" : "; omit stage_coverage or leave it as an empty array, this scenario has none") +
     "):");
   promptParts.push(JSON.stringify(schemaExample));
+  promptParts.push("The \"identified\", \"covered\", and \"followed_order\" fields must be real JSON boolean values (true or false, no quotation marks) — never the text \"true\"/\"false\" as a string. Make sure these always agree with your comment for that entry.");
   promptParts.push("Include at most 3 coachable_moments, the most instructive ones.");
-  promptParts.push("Keep every comment field in vas_coverage and stage_coverage to 10 words or fewer — these need to stay short since there can be many entries. Do not pad or explain at length; a terse phrase is enough.");
+  promptParts.push("Keep every comment field in vas_coverage and stage_coverage to 10 words or fewer.");
   promptParts.push("Transcript:");
   promptParts.push(transcript);
 
   var prompt = promptParts.join("\n");
 
   try {
-    var text = null;
-    var lastErr = null;
-    for (var i = 0; i < GEMINI_MODELS.length; i++) {
-      var model = GEMINI_MODELS[i];
-      try {
-        var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + process.env.GEMINI_API_KEY;
-        var gRes = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0.3 },
-          }),
-        });
-        var data = await gRes.json();
-        if (!gRes.ok) throw new Error((data && data.error && data.error.message) || ("Gemini error (" + gRes.status + ")"));
-        var candidate = data.candidates && data.candidates[0];
-        text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
-        if (text) break;
-      } catch (e) {
-        lastErr = e;
-        text = null;
-      }
+    // Scoring under real-world concurrent load can occasionally return a
+    // truncated or malformed response (shared free-tier API contention).
+    // Rather than failing the employee's whole call outright, retry a
+    // couple of times — this alone resolves the large majority of
+    // transient failures without the employee losing their attempt.
+    var parsed = null;
+    var lastSnippet = "";
+    var attempts = 3;
+    for (var attempt = 1; attempt <= attempts; attempt++) {
+      var text = await callGeminiOnce(prompt);
+      var result = tryParseJson(text);
+      if (result.ok) { parsed = result.data; break; }
+      lastSnippet = result.snippet;
+      // brief pause before retrying, so a shared rate limit has a moment to ease
+      await new Promise(function (resolve) { setTimeout(resolve, 800 * attempt); });
     }
-    if (!text) throw lastErr || new Error("No Gemini model responded.");
-    text = text.replace(/```json|```/g, "").trim();
-
-    var r;
-    try {
-      r = JSON.parse(text);
-    } catch (parseErr) {
-      var start = text.indexOf("{");
-      var end = text.lastIndexOf("}");
-      if (start !== -1 && end !== -1 && end > start) {
-        try { r = JSON.parse(text.slice(start, end + 1)); }
-        catch (secondErr) { return res.status(200).json({ saved: false, error: "Could not parse the report. Raw start: " + text.slice(0, 300) }); }
-      } else {
-        return res.status(200).json({ saved: false, error: "Could not parse the report. Raw start: " + text.slice(0, 300) });
-      }
+    if (!parsed) {
+      return res.status(200).json({ saved: false, error: "Could not generate the report after several attempts — this can happen when many people are practicing at once. Please try again in a moment. (Raw start: " + lastSnippet + ")" });
     }
+    var r = parsed;
 
     var clamp = function (n) { return Math.max(0, Math.min(100, Math.round(Number(n) || 0))); };
     var cleanParams = {};
@@ -199,7 +233,7 @@ export default async function handler(req, res) {
     var cleanVas = Array.isArray(r.vas_coverage) ? r.vas_coverage.slice(0, 15).map(function (v) {
       return {
         service_name: String(v.service_name || "").slice(0, 100),
-        identified: !!v.identified,
+        identified: toBool(v.identified),
         comment: String(v.comment || "").slice(0, 300),
       };
     }) : [];
@@ -207,8 +241,8 @@ export default async function handler(req, res) {
     var cleanStageCoverage = Array.isArray(r.stage_coverage) ? r.stage_coverage.slice(0, 15).map(function (v) {
       return {
         section_title: String(v.section_title || "").slice(0, 150),
-        covered: !!v.covered,
-        followed_order: !!v.followed_order,
+        covered: toBool(v.covered),
+        followed_order: toBool(v.followed_order),
         comment: String(v.comment || "").slice(0, 300),
       };
     }) : [];
