@@ -12,7 +12,7 @@ export default function TakeQuiz() {
   const [quiz, setQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({}); // questionId -> chosen index (multiple choice)
-  const [screenshots, setScreenshots] = useState({}); // questionId -> { path, previewUrl, correct, feedback, grading }
+  const [screenshots, setScreenshots] = useState({}); // questionId -> { paths: [], previews: [], correct, feedback, grading }
   const [result, setResult] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -34,31 +34,37 @@ export default function TakeQuiz() {
 
   const pick = (questionId, index) => setAnswers({ ...answers, [questionId]: index });
 
-  const uploadScreenshot = async (question, file) => {
-    if (!file) return;
+  const uploadScreenshots = async (question, fileList) => {
+    const files = Array.from(fileList || []).slice(0, 5); // up to 5 images per answer
+    if (files.length === 0) return;
     setMsg(null);
-    setScreenshots((prev) => ({ ...prev, [question.id]: { grading: true, previewUrl: URL.createObjectURL(file) } }));
+    const previews = files.map((f) => URL.createObjectURL(f));
+    setScreenshots((prev) => ({ ...prev, [question.id]: { grading: true, previews } }));
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const ext = (file.name.split(".").pop() || "png").toLowerCase();
-      const path = `${session.user.id}/${quizId}/${question.id}-${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("quiz-screenshots").upload(path, file, { upsert: false });
-      if (upErr) throw new Error(upErr.message);
+      const paths = [];
+      for (const file of files) {
+        const ext = (file.name.split(".").pop() || "png").toLowerCase();
+        const path = `${session.user.id}/${quizId}/${question.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        const { error: upErr } = await supabase.storage.from("quiz-screenshots").upload(path, file, { upsert: false });
+        if (upErr) throw new Error(upErr.message);
+        paths.push(path);
+      }
 
       const res = await fetch("/api/grade-screenshot", {
         method: "POST", headers: await authHeader(),
-        body: JSON.stringify({ questionId: question.id, screenshotPath: path }),
+        body: JSON.stringify({ questionId: question.id, screenshotPaths: paths }),
       });
       const json = await res.json();
-      if (!res.ok || !json.graded) throw new Error(json.error || "Could not review the screenshot.");
+      if (!res.ok || !json.graded) throw new Error(json.error || "Could not review the screenshots.");
 
       setScreenshots((prev) => ({
         ...prev,
-        [question.id]: { path, previewUrl: prev[question.id]?.previewUrl, grading: false, correct: json.correct, feedback: json.feedback },
+        [question.id]: { paths, previews, grading: false, correct: json.correct, feedback: json.feedback },
       }));
     } catch (e) {
-      setScreenshots((prev) => ({ ...prev, [question.id]: { grading: false, error: e.message || "Upload failed." } }));
+      setScreenshots((prev) => ({ ...prev, [question.id]: { ...prev[question.id], grading: false, error: e.message || "Upload failed." } }));
     }
   };
 
@@ -77,7 +83,7 @@ export default function TakeQuiz() {
       if (q.question_type === "screenshot") {
         const s = screenshots[q.id];
         if (s?.correct) correct += 1;
-        answerLog[q.id] = { type: "screenshot", path: s?.path, correct: !!s?.correct, feedback: s?.feedback };
+        answerLog[q.id] = { type: "screenshot", paths: s?.paths || [], correct: !!s?.correct, feedback: s?.feedback };
       } else {
         const isRight = answers[q.id] === q.correct_index;
         if (isRight) correct += 1;
@@ -130,13 +136,19 @@ export default function TakeQuiz() {
                 {q.question_type === "screenshot" ? (
                   <div>
                     <input
-                      type="file" accept="image/*"
-                      onChange={(e) => uploadScreenshot(q, e.target.files?.[0])}
+                      type="file" accept="image/*" multiple
+                      onChange={(e) => uploadScreenshots(q, e.target.files)}
                     />
-                    {screenshots[q.id]?.previewUrl && (
-                      <img src={screenshots[q.id].previewUrl} alt="Your screenshot" style={{ maxWidth: 260, borderRadius: 10, marginTop: 10, display: "block" }} />
+                    <div className="mini" style={{ marginTop: 4 }}>You can select multiple screenshots at once if your answer needs more than one.</div>
+
+                    {screenshots[q.id]?.previews?.length > 0 && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                        {screenshots[q.id].previews.map((url, pi) => (
+                          <img key={pi} src={url} alt={`Your screenshot ${pi + 1}`} style={{ maxWidth: 160, borderRadius: 10 }} />
+                        ))}
+                      </div>
                     )}
-                    {screenshots[q.id]?.grading && <p className="mini" style={{ marginTop: 8 }}>🔎 AI is reviewing your screenshot…</p>}
+                    {screenshots[q.id]?.grading && <p className="mini" style={{ marginTop: 8 }}>🔎 AI is reviewing your screenshots…</p>}
                     {screenshots[q.id]?.error && <p className="mini" style={{ marginTop: 8, color: "var(--red-dark)" }}>{screenshots[q.id].error} — try uploading again.</p>}
                     {screenshots[q.id]?.correct !== undefined && (
                       <div className="tile" style={{ marginTop: 10, background: screenshots[q.id].correct ? "#e8f6ee" : "#fdeaec" }}>
