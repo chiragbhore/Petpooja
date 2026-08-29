@@ -3,7 +3,7 @@ import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
-const blankQ = { question: "", options: ["", "", "", ""], correct_index: 0 };
+const blankQ = { question_type: "multiple_choice", question: "", options: ["", "", "", ""], correct_index: 0, answer_guide: "" };
 
 export default function AdminQuizzes() {
   const { loading, me } = useProfile("admin");
@@ -47,12 +47,15 @@ export default function AdminQuizzes() {
 
   const addQuestion = async (quizId) => {
     const q = getQForm(quizId);
-    if (!q.question.trim() || q.options.some((o) => !o.trim())) { setMsg("Fill in the question and all 4 options."); return; }
+    if (!q.question.trim()) { setMsg("Fill in the question."); return; }
+    if (q.question_type === "multiple_choice" && q.options.some((o) => !o.trim())) { setMsg("Fill in all 4 options."); return; }
+    if (q.question_type === "screenshot" && !q.answer_guide.trim()) { setMsg("Describe what a correct screenshot should show."); return; }
     setMsg(null);
     const count = (questionsByQuiz[quizId] || []).length;
-    const { error } = await supabase.from("quiz_questions").insert({
-      quiz_id: quizId, question: q.question, options: q.options, correct_index: q.correct_index, sort_order: count,
-    });
+    const payload = q.question_type === "screenshot"
+      ? { quiz_id: quizId, question_type: "screenshot", question: q.question, answer_guide: q.answer_guide, options: null, correct_index: null, sort_order: count }
+      : { quiz_id: quizId, question_type: "multiple_choice", question: q.question, options: q.options, correct_index: q.correct_index, answer_guide: null, sort_order: count };
+    const { error } = await supabase.from("quiz_questions").insert(payload);
     if (error) { setMsg(error.message); return; }
     setQForm({ ...qForm, [quizId]: blankQ });
     load();
@@ -69,7 +72,7 @@ export default function AdminQuizzes() {
       <Sidebar role="admin" me={me} />
       <main className="content">
         <h1 className="page">Assessments</h1>
-        <p className="sub">Build quizzes to check real understanding after a course.</p>
+        <p className="sub">Build quizzes to check real understanding after a course — multiple choice, or a screenshot the AI reviews.</p>
         {msg && <div className="msg err">{msg}</div>}
 
         <div className="card pad" style={{ marginBottom: 22 }}>
@@ -110,14 +113,21 @@ export default function AdminQuizzes() {
                   <div key={q.id} className="lesson" style={{ alignItems: "flex-start", padding: "10px 0" }}>
                     <div className="num">{i + 1}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{q.question}</div>
-                      <div className="mini" style={{ marginTop: 4 }}>
-                        {q.options.map((o, oi) => (
-                          <span key={oi} style={{ marginRight: 12, color: oi === q.correct_index ? "#15803d" : undefined, fontWeight: oi === q.correct_index ? 700 : 400 }}>
-                            {oi === q.correct_index ? "✓ " : ""}{o}
-                          </span>
-                        ))}
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>
+                        {q.question}
+                        {q.question_type === "screenshot" && <span className="pill red" style={{ marginLeft: 8 }}>📷 Screenshot</span>}
                       </div>
+                      {q.question_type === "screenshot" ? (
+                        <div className="mini" style={{ marginTop: 4 }}>AI checks for: {q.answer_guide}</div>
+                      ) : (
+                        <div className="mini" style={{ marginTop: 4 }}>
+                          {(q.options || []).map((o, oi) => (
+                            <span key={oi} style={{ marginRight: 12, color: oi === q.correct_index ? "#15803d" : undefined, fontWeight: oi === q.correct_index ? 700 : 400 }}>
+                              {oi === q.correct_index ? "✓ " : ""}{o}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <button className="btn ghost" onClick={() => delQuestion(q.id)}>Remove</button>
                   </div>
@@ -126,22 +136,37 @@ export default function AdminQuizzes() {
 
               <div style={{ marginTop: 14, background: "#fafbfc", borderRadius: 12, padding: 16 }}>
                 <div className="mini" style={{ fontWeight: 700, marginBottom: 10 }}>Add a question</div>
-                <label className="field"><span>Question</span>
-                  <input value={draft.question} onChange={(e) => setQ(quiz.id, { question: e.target.value })} placeholder="What's the first step in a discovery call?" /></label>
-                <div className="grid2">
-                  {[0, 1, 2, 3].map((i) => (
-                    <label key={i} className="field">
-                      <span>
-                        <input type="radio" name={"correct-" + quiz.id} checked={draft.correct_index === i}
-                          onChange={() => setQ(quiz.id, { correct_index: i })} style={{ width: "auto", marginRight: 6 }} />
-                        Option {i + 1} {draft.correct_index === i && "(correct)"}
-                      </span>
-                      <input value={draft.options[i]} onChange={(e) => {
-                        const opts = [...draft.options]; opts[i] = e.target.value; setQ(quiz.id, { options: opts });
-                      }} />
-                    </label>
-                  ))}
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <button type="button" className={`chipbtn ${draft.question_type === "multiple_choice" ? "on" : ""}`} onClick={() => setQ(quiz.id, { question_type: "multiple_choice" })}>Multiple choice</button>
+                  <button type="button" className={`chipbtn ${draft.question_type === "screenshot" ? "on" : ""}`} onClick={() => setQ(quiz.id, { question_type: "screenshot" })}>📷 Screenshot (AI-reviewed)</button>
                 </div>
+
+                <label className="field"><span>Question</span>
+                  <input value={draft.question} onChange={(e) => setQ(quiz.id, { question: e.target.value })}
+                    placeholder={draft.question_type === "screenshot" ? "e.g. Show a screenshot of a completed KDS order screen" : "What's the first step in a discovery call?"} /></label>
+
+                {draft.question_type === "screenshot" ? (
+                  <label className="field"><span>What should a correct screenshot show? (this guides the AI reviewer)</span>
+                    <textarea rows={3} value={draft.answer_guide} onChange={(e) => setQ(quiz.id, { answer_guide: e.target.value })}
+                      placeholder="e.g. A screenshot from the Petpooja admin portal's KDS screen showing at least one order in 'Preparing' status, with the order items visible." />
+                  </label>
+                ) : (
+                  <div className="grid2">
+                    {[0, 1, 2, 3].map((i) => (
+                      <label key={i} className="field">
+                        <span>
+                          <input type="radio" name={"correct-" + quiz.id} checked={draft.correct_index === i}
+                            onChange={() => setQ(quiz.id, { correct_index: i })} style={{ width: "auto", marginRight: 6 }} />
+                          Option {i + 1} {draft.correct_index === i && "(correct)"}
+                        </span>
+                        <input value={draft.options[i]} onChange={(e) => {
+                          const opts = [...draft.options]; opts[i] = e.target.value; setQ(quiz.id, { options: opts });
+                        }} />
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <button className="btn outline" onClick={() => addQuestion(quiz.id)}>+ Add question</button>
               </div>
             </div>
