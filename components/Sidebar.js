@@ -2,8 +2,6 @@ import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 import ThemeToggle from "./ThemeToggle";
 
-// Content areas admins/trainers can reach, and the permission key each
-// one is gated by. Trainers only see links they've been granted.
 const STAFF_LINKS = [
   ["/admin/courses", "Courses", "courses"],
   ["/admin/scenarios", "Roleplays", "scenarios"],
@@ -16,13 +14,15 @@ const REPORT_LINKS = [
   ["/admin/reports", "Call Reports", "reports"],
   ["/admin/improvements", "Areas of Improvement", "reports"],
   ["/admin/roleplay-coverage-report", "Roleplay Coverage", "reports"],
+  ["/admin/quiz-review", "Assessment Review", "reports"],
+  ["/admin/voice-logs", "Voice Call Logs", "reports"],
 ];
 
 export default function Sidebar({ role, me }) {
   const router = useRouter();
   const path = router.pathname;
 
-  let groups; // [{ label: string|null, links: [[href, label]] }]
+  let groups;
   if (role === "admin") {
     groups = [
       { label: null, links: [["/admin", "Overview"]] },
@@ -45,6 +45,7 @@ export default function Sidebar({ role, me }) {
         ["/employee/roleplay", "Roleplay"],
         ["/employee/my-calls", "My Calls"],
         ["/employee/improvements", "My Improvement"],
+        ["/employee/assessment-scores", "My Assessment Scores"],
         ["/employee/classroom", "Classroom"],
       ] },
     ];
