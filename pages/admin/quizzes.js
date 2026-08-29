@@ -3,7 +3,7 @@ import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
-const blankQ = { question_type: "multiple_choice", question: "", options: ["", "", "", ""], correct_index: 0, answer_guide: "" };
+const blankQ = { question_type: "multiple_choice", question: "", options: ["", "", "", ""], correct_index: 0, answer_guide: "", reference_images: [] };
 
 export default function AdminQuizzes() {
   const { loading, me } = useProfile("admin");
@@ -44,6 +44,26 @@ export default function AdminQuizzes() {
 
   const getQForm = (quizId) => qForm[quizId] || blankQ;
   const setQ = (quizId, patch) => setQForm({ ...qForm, [quizId]: { ...getQForm(quizId), ...patch } });
+  const [refUploading, setRefUploading] = useState({}); // quizId -> boolean
+
+  const uploadReferenceImages = async (quizId, files) => {
+    if (!files || files.length === 0) return;
+    setRefUploading((prev) => ({ ...prev, [quizId]: true }));
+    const draft = getQForm(quizId);
+    const uploaded = [...(draft.reference_images || [])];
+    for (const file of files) {
+      const ext = (file.name.split(".").pop() || "png").toLowerCase();
+      const path = `${quizId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage.from("quiz-reference-images").upload(path, file, { upsert: false });
+      if (!error) uploaded.push(path);
+    }
+    setQ(quizId, { reference_images: uploaded });
+    setRefUploading((prev) => ({ ...prev, [quizId]: false }));
+  };
+  const removeReferenceImage = (quizId, path) => {
+    const draft = getQForm(quizId);
+    setQ(quizId, { reference_images: (draft.reference_images || []).filter((p) => p !== path) });
+  };
 
   const addQuestion = async (quizId) => {
     const q = getQForm(quizId);
@@ -53,7 +73,7 @@ export default function AdminQuizzes() {
     setMsg(null);
     const count = (questionsByQuiz[quizId] || []).length;
     const payload = q.question_type === "screenshot"
-      ? { quiz_id: quizId, question_type: "screenshot", question: q.question, answer_guide: q.answer_guide, options: null, correct_index: null, sort_order: count }
+      ? { quiz_id: quizId, question_type: "screenshot", question: q.question, answer_guide: q.answer_guide, reference_images: q.reference_images || [], options: null, correct_index: null, sort_order: count }
       : { quiz_id: quizId, question_type: "multiple_choice", question: q.question, options: q.options, correct_index: q.correct_index, answer_guide: null, sort_order: count };
     const { error } = await supabase.from("quiz_questions").insert(payload);
     if (error) { setMsg(error.message); return; }
@@ -119,6 +139,9 @@ export default function AdminQuizzes() {
                       </div>
                       {q.question_type === "screenshot" ? (
                         <div className="mini" style={{ marginTop: 4 }}>AI checks for: {q.answer_guide}</div>
+                        {Array.isArray(q.reference_images) && q.reference_images.length > 0 && (
+                          <div className="mini" style={{ marginTop: 2 }}>📎 {q.reference_images.length} reference example{q.reference_images.length === 1 ? "" : "s"} attached</div>
+                        )}
                       ) : (
                         <div className="mini" style={{ marginTop: 4 }}>
                           {(q.options || []).map((o, oi) => (
@@ -151,6 +174,20 @@ export default function AdminQuizzes() {
                     <textarea rows={3} value={draft.answer_guide} onChange={(e) => setQ(quiz.id, { answer_guide: e.target.value })}
                       placeholder="e.g. A screenshot from the Petpooja admin portal's KDS screen showing at least one order in 'Preparing' status, with the order items visible." />
                   </label>
+
+                  <label className="field">
+                    <span>Upload correct example screenshots (optional, but recommended — the AI will compare an employee's answer against the real content in these, like item names, prices, or contact details)</span>
+                    <input type="file" accept="image/*" multiple onChange={(e) => uploadReferenceImages(quiz.id, e.target.files)} />
+                  </label>
+                  {refUploading[quiz.id] && <div className="mini" style={{ marginBottom: 10 }}>Uploading…</div>}
+                  {(draft.reference_images || []).length > 0 && (
+                    <div className="mini" style={{ marginBottom: 12 }}>
+                      {draft.reference_images.length} reference image{draft.reference_images.length === 1 ? "" : "s"} attached.{" "}
+                      {draft.reference_images.map((p, i) => (
+                        <button key={p} type="button" className="btn ghost sm" style={{ marginLeft: i === 0 ? 0 : 6 }} onClick={() => removeReferenceImage(quiz.id, p)}>Remove #{i + 1}</button>
+                      ))}
+                    </div>
+                  )}
                 ) : (
                   <div className="grid2">
                     {[0, 1, 2, 3].map((i) => (
