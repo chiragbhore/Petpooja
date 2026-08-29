@@ -10,7 +10,7 @@ export default function AdminQuizzes() {
   const [courses, setCourses] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [questionsByQuiz, setQuestionsByQuiz] = useState({});
-  const [form, setForm] = useState({ course_id: "", title: "", pass_percent: 70 });
+  const [form, setForm] = useState({ course_id: "", title: "", pass_percent: 70, time_limit_minutes: "" });
   const [qForm, setQForm] = useState({}); // quizId -> question draft
   const [msg, setMsg] = useState(null);
 
@@ -34,9 +34,10 @@ export default function AdminQuizzes() {
     if (!form.course_id || !form.title.trim()) { setMsg("Pick a course and enter a title."); return; }
     const { error } = await supabase.from("quizzes").insert({
       course_id: form.course_id, title: form.title, pass_percent: Number(form.pass_percent) || 70,
+      time_limit_minutes: form.time_limit_minutes ? Number(form.time_limit_minutes) : null,
     });
     if (error) { setMsg(error.message); return; }
-    setForm({ course_id: "", title: "", pass_percent: 70 });
+    setForm({ course_id: "", title: "", pass_percent: 70, time_limit_minutes: "" });
     load();
   };
 
@@ -108,6 +109,9 @@ export default function AdminQuizzes() {
               <label className="field"><span>Pass mark (%)</span>
                 <input type="number" min="0" max="100" value={form.pass_percent} onChange={(e) => setForm({ ...form, pass_percent: e.target.value })} />
               </label>
+              <label className="field"><span>Time limit in minutes (optional)</span>
+                <input type="number" min="1" value={form.time_limit_minutes} onChange={(e) => setForm({ ...form, time_limit_minutes: e.target.value })} placeholder="Leave blank for no limit" />
+              </label>
             </div>
             <label className="field"><span>Quiz title</span>
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Foundations Knowledge Check" required /></label>
@@ -123,7 +127,7 @@ export default function AdminQuizzes() {
               <div className="row-between">
                 <div>
                   <b>{quiz.title}</b>
-                  <div className="mini">{courseName(quiz.course_id)} · Pass mark {quiz.pass_percent}% · {questions.length} question{questions.length === 1 ? "" : "s"}</div>
+                  <div className="mini">{courseName(quiz.course_id)} · Pass mark {quiz.pass_percent}% · {questions.length} question{questions.length === 1 ? "" : "s"}{quiz.time_limit_minutes ? ` · ⏱ ${quiz.time_limit_minutes} min limit` : ""}</div>
                 </div>
                 <button className="btn danger" onClick={() => delQuiz(quiz.id)}>Delete quiz</button>
               </div>
