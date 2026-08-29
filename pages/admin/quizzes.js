@@ -138,10 +138,12 @@ export default function AdminQuizzes() {
                         {q.question_type === "screenshot" && <span className="pill red" style={{ marginLeft: 8 }}>📷 Screenshot</span>}
                       </div>
                       {q.question_type === "screenshot" ? (
-                        <div className="mini" style={{ marginTop: 4 }}>AI checks for: {q.answer_guide}</div>
-                        {Array.isArray(q.reference_images) && q.reference_images.length > 0 && (
-                          <div className="mini" style={{ marginTop: 2 }}>📎 {q.reference_images.length} reference example{q.reference_images.length === 1 ? "" : "s"} attached</div>
-                        )}
+                        <>
+                          <div className="mini" style={{ marginTop: 4 }}>AI checks for: {q.answer_guide}</div>
+                          {Array.isArray(q.reference_images) && q.reference_images.length > 0 && (
+                            <div className="mini" style={{ marginTop: 2 }}>📎 {q.reference_images.length} reference example{q.reference_images.length === 1 ? "" : "s"} attached</div>
+                          )}
+                        </>
                       ) : (
                         <div className="mini" style={{ marginTop: 4 }}>
                           {(q.options || []).map((o, oi) => (
@@ -170,24 +172,26 @@ export default function AdminQuizzes() {
                     placeholder={draft.question_type === "screenshot" ? "e.g. Show a screenshot of a completed KDS order screen" : "What's the first step in a discovery call?"} /></label>
 
                 {draft.question_type === "screenshot" ? (
-                  <label className="field"><span>What should a correct screenshot show? (this guides the AI reviewer)</span>
-                    <textarea rows={3} value={draft.answer_guide} onChange={(e) => setQ(quiz.id, { answer_guide: e.target.value })}
-                      placeholder="e.g. A screenshot from the Petpooja admin portal's KDS screen showing at least one order in 'Preparing' status, with the order items visible." />
-                  </label>
+                  <>
+                    <label className="field"><span>What should a correct screenshot show? (this guides the AI reviewer)</span>
+                      <textarea rows={3} value={draft.answer_guide} onChange={(e) => setQ(quiz.id, { answer_guide: e.target.value })}
+                        placeholder="e.g. A screenshot from the Petpooja admin portal's KDS screen showing at least one order in 'Preparing' status, with the order items visible." />
+                    </label>
 
-                  <label className="field">
-                    <span>Upload correct example screenshots (optional, but recommended — the AI will compare an employee's answer against the real content in these, like item names, prices, or contact details)</span>
-                    <input type="file" accept="image/*" multiple onChange={(e) => uploadReferenceImages(quiz.id, e.target.files)} />
-                  </label>
-                  {refUploading[quiz.id] && <div className="mini" style={{ marginBottom: 10 }}>Uploading…</div>}
-                  {(draft.reference_images || []).length > 0 && (
-                    <div className="mini" style={{ marginBottom: 12 }}>
-                      {draft.reference_images.length} reference image{draft.reference_images.length === 1 ? "" : "s"} attached.{" "}
-                      {draft.reference_images.map((p, i) => (
-                        <button key={p} type="button" className="btn ghost sm" style={{ marginLeft: i === 0 ? 0 : 6 }} onClick={() => removeReferenceImage(quiz.id, p)}>Remove #{i + 1}</button>
-                      ))}
-                    </div>
-                  )}
+                    <label className="field">
+                      <span>Upload correct example screenshots (optional, but recommended — the AI will compare an employee's answer against the real content in these, like item names, prices, or contact details)</span>
+                      <input type="file" accept="image/*" multiple onChange={(e) => uploadReferenceImages(quiz.id, e.target.files)} />
+                    </label>
+                    {refUploading[quiz.id] && <div className="mini" style={{ marginBottom: 10 }}>Uploading…</div>}
+                    {(draft.reference_images || []).length > 0 && (
+                      <div className="mini" style={{ marginBottom: 12 }}>
+                        {draft.reference_images.length} reference image{draft.reference_images.length === 1 ? "" : "s"} attached.{" "}
+                        {draft.reference_images.map((p, i) => (
+                          <button key={p} type="button" className="btn ghost sm" style={{ marginLeft: i === 0 ? 0 : 6 }} onClick={() => removeReferenceImage(quiz.id, p)}>Remove #{i + 1}</button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="grid2">
                     {[0, 1, 2, 3].map((i) => (
