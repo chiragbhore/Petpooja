@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
-const GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"];
+const GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash-lite"];
 
 const PARAMETERS = [
   "Product Knowledge",
@@ -39,14 +39,25 @@ async function callGeminiOnce(prompt) {
     var model = GEMINI_MODELS[i];
     try {
       var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + process.env.GEMINI_API_KEY;
-      var gRes = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0.3 },
-        }),
-      });
+      // A stuck/overloaded request shouldn't be allowed to eat the whole
+      // budget — give up on it after 15s and move to the next model or
+      // retry attempt, rather than waiting indefinitely.
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function () { controller.abort(); }, 15000);
+      var gRes;
+      try {
+        gRes = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0.3 },
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       var data = await gRes.json();
       if (!gRes.ok) throw new Error((data && data.error && data.error.message) || ("Gemini error (" + gRes.status + ")"));
       var candidate = data.candidates && data.candidates[0];
@@ -216,7 +227,7 @@ export default async function handler(req, res) {
       if (result.ok) { parsed = result.data; break; }
       lastSnippet = result.snippet;
       // brief pause before retrying, so a shared rate limit has a moment to ease
-      await new Promise(function (resolve) { setTimeout(resolve, 800 * attempt); });
+      await new Promise(function (resolve) { setTimeout(resolve, 350 * attempt); });
     }
     if (!parsed) {
       return res.status(200).json({ saved: false, error: "Could not generate the report after several attempts — this can happen when many people are practicing at once. Please try again in a moment. (Raw start: " + lastSnippet + ")" });
