@@ -132,7 +132,7 @@ export default function QuizReview() {
 
         {open && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }} onClick={() => setOpen(null)}>
-            <div className="card pad scroll" style={{ width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="card pad scroll" style={{ width: 960, maxWidth: "100%", maxHeight: "92vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
               <div className="row-between" style={{ marginBottom: 12 }}>
                 <b>{employees[open.user_id]} — {quizzes[open.quiz_id]}</b>
                 <span style={{ cursor: "pointer", color: "#9aa0aa" }} onClick={() => setOpen(null)}>✕</span>
@@ -172,7 +172,7 @@ export default function QuizReview() {
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>{r.question}</div>
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
                           {(r.paths || []).map((p, pi) => (
-                            imageUrls[p] ? <img key={pi} src={imageUrls[p]} alt={`Submission ${pi + 1}`} style={{ maxWidth: 420, maxHeight: 420, borderRadius: 10, border: "1px solid var(--line)" }} /> : (
+                            imageUrls[p] ? <img key={pi} src={imageUrls[p]} alt={`Submission ${pi + 1}`} style={{ maxWidth: 820, width: "100%", maxHeight: 700, objectFit: "contain", borderRadius: 10, border: "1px solid var(--line)" }} /> : (
                               <div key={pi} className="mini">Image no longer available (cleared after a previous review).</div>
                             )
                           ))}
