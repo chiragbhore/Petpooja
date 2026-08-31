@@ -3,7 +3,7 @@ import { useProfile } from "../../lib/useProfile";
 import { supabase } from "../../lib/supabaseClient";
 import Sidebar from "../../components/Sidebar";
 
-const blankQ = { question_type: "multiple_choice", question: "", options: ["", "", "", ""], multi_correct: false, correct_indices: [0], answer_guide: "", reference_images: [] };
+const blankQ = { question_type: "multiple_choice", question: "", options: ["", "", "", ""], multi_correct: false, correct_indices: [0], answer_guide: "", reference_images: [], media_url: "", media_type: "" };
 
 export default function AdminQuizzes() {
   const { loading, me } = useProfile("admin");
@@ -79,6 +79,22 @@ export default function AdminQuizzes() {
     setQ(quizId, { reference_images: (draft.reference_images || []).filter((p) => p !== path) });
   };
 
+  const uploadQuestionMedia = async (quizId, file) => {
+    if (!file) return;
+    setMsg(null);
+    const isVideo = file.type.startsWith("video/");
+    const ext = (file.name.split(".").pop() || (isVideo ? "mp4" : "png")).toLowerCase();
+    const path = `${quizId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("quiz-question-media").upload(path, file, { upsert: false });
+    if (error) {
+      setMsg("⚠ Media upload failed: " + error.message + (error.message.includes("not found") ? " — the 'quiz-question-media' storage bucket needs to be created first." : ""));
+      return;
+    }
+    const { data } = supabase.storage.from("quiz-question-media").getPublicUrl(path);
+    setQ(quizId, { media_url: data.publicUrl, media_type: isVideo ? "video" : "image" });
+  };
+  const removeQuestionMedia = (quizId) => setQ(quizId, { media_url: "", media_type: "" });
+
   const toggleCorrect = (quizId, index) => {
     const draft = getQForm(quizId);
     if (draft.multi_correct) {
@@ -101,6 +117,8 @@ export default function AdminQuizzes() {
         correct_indices: Array.isArray(q.correct_indices) ? q.correct_indices : [q.correct_index ?? 0],
         answer_guide: q.answer_guide || "",
         reference_images: q.reference_images || [],
+        media_url: q.media_url || "",
+        media_type: q.media_type || "",
       },
     });
   };
@@ -121,8 +139,8 @@ export default function AdminQuizzes() {
     setMsg(null);
 
     const payload = q.question_type === "screenshot"
-      ? { quiz_id: quizId, question_type: "screenshot", question: q.question, answer_guide: q.answer_guide, reference_images: q.reference_images || [], options: null, correct_index: null, correct_indices: null, multi_correct: false }
-      : { quiz_id: quizId, question_type: "multiple_choice", question: q.question, options: q.options, correct_index: q.correct_indices[0], correct_indices: q.correct_indices, multi_correct: q.multi_correct, answer_guide: null, reference_images: [] };
+      ? { quiz_id: quizId, question_type: "screenshot", question: q.question, answer_guide: q.answer_guide, reference_images: q.reference_images || [], options: null, correct_index: null, correct_indices: null, multi_correct: false, media_url: q.media_url || null, media_type: q.media_type || null }
+      : { quiz_id: quizId, question_type: "multiple_choice", question: q.question, options: q.options, correct_index: q.correct_indices[0], correct_indices: q.correct_indices, multi_correct: q.multi_correct, answer_guide: null, reference_images: [], media_url: q.media_url || null, media_type: q.media_type || null };
 
     if (editingId) {
       const { error } = await supabase.from("quiz_questions").update(payload).eq("id", editingId);
@@ -212,6 +230,7 @@ export default function AdminQuizzes() {
                         {q.question}
                         {q.question_type === "screenshot" && <span className="pill red" style={{ marginLeft: 8 }}>📷 Screenshot</span>}
                         {q.multi_correct && <span className="pill" style={{ marginLeft: 8 }}>☑ Multi-select</span>}
+                        {q.media_url && <span className="pill" style={{ marginLeft: 8 }}>{q.media_type === "video" ? "🎬" : "🖼️"} Media attached</span>}
                       </div>
                       {q.question_type === "screenshot" ? (
                         <>
@@ -251,6 +270,21 @@ export default function AdminQuizzes() {
                 <label className="field"><span>Question</span>
                   <input value={draft.question} onChange={(e) => setQ(quiz.id, { question: e.target.value })}
                     placeholder={draft.question_type === "screenshot" ? "e.g. Show a screenshot of a completed KDS order screen" : "What's the first step in a discovery call?"} /></label>
+
+                <label className="field">
+                  <span>Attach an image or video to this question (optional — shown to the employee above the question)</span>
+                  <input type="file" accept="image/*,video/*" onChange={(e) => uploadQuestionMedia(quiz.id, e.target.files?.[0])} />
+                </label>
+                {draft.media_url && (
+                  <div style={{ marginBottom: 14 }}>
+                    {draft.media_type === "video" ? (
+                      <video src={draft.media_url} controls style={{ maxWidth: 260, borderRadius: 10, display: "block" }} />
+                    ) : (
+                      <img src={draft.media_url} alt="Question media" style={{ maxWidth: 260, borderRadius: 10, display: "block" }} />
+                    )}
+                    <button type="button" className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => removeQuestionMedia(quiz.id)}>Remove media</button>
+                  </div>
+                )}
 
                 {draft.question_type === "screenshot" ? (
                   <>
