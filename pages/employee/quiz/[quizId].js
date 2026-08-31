@@ -18,9 +18,9 @@ export default function TakeQuiz() {
   const [quiz, setQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [attemptId, setAttemptId] = useState(null);
-  const [answers, setAnswers] = useState({}); // questionId -> { chosenIndex } | { paths, previews }
+  const [answers, setAnswers] = useState({}); // questionId -> { chosenIndex } | { chosenIndices } | { paths, previews }
   const [skipped, setSkipped] = useState(new Set());
-  const [timeLeft, setTimeLeft] = useState(null); // seconds, or null if no limit
+  const [timeLeft, setTimeLeft] = useState(null);
   const [result, setResult] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -34,9 +34,6 @@ export default function TakeQuiz() {
     return { Authorization: `Bearer ${session?.access_token}`, "Content-Type": "application/json" };
   };
 
-  // Load the quiz, and either resume an in-progress attempt or start a
-  // fresh one — this is what lets a crash or dropped connection pick up
-  // exactly where the employee left off, instead of losing everything.
   useEffect(() => {
     if (loading || !quizId || !me) return;
     (async () => {
@@ -70,7 +67,6 @@ export default function TakeQuiz() {
     })();
   }, [loading, quizId, me]);
 
-  // Countdown timer, auto-submits when it hits zero.
   useEffect(() => {
     if (timeLeft === null || result) return;
     if (timeLeft <= 0) {
@@ -82,30 +78,30 @@ export default function TakeQuiz() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, result]);
 
-  // Persist an answer both locally and to the database immediately, so
-  // progress survives a crash, timeout, or dropped connection.
   const saveAnswer = async (questionId, value) => {
     const next = { ...answers, [questionId]: value };
     setAnswers(next);
     setSkipped((prev) => { const s = new Set(prev); s.delete(questionId); return s; });
-    if (attemptId) {
-      await supabase.from("quiz_attempts").update({ answers: next }).eq("id", attemptId);
-    }
+    if (attemptId) await supabase.from("quiz_attempts").update({ answers: next }).eq("id", attemptId);
   };
 
-  const pick = (questionId, index) => saveAnswer(questionId, { chosenIndex: index });
+  const pickSingle = (questionId, index) => saveAnswer(questionId, { chosenIndex: index });
+  const toggleMulti = (question, index) => {
+    const current = answers[question.id]?.chosenIndices || [];
+    const next = current.includes(index) ? current.filter((i) => i !== index) : [...current, index].sort();
+    saveAnswer(question.id, { chosenIndices: next });
+  };
 
-  const uploadScreenshots = async (question, fileList) => {
-    const files = Array.from(fileList || []).slice(0, 5);
-    if (files.length === 0) return;
+  const doUpload = async (question, files) => {
+    const list = Array.from(files || []).slice(0, 5);
+    if (list.length === 0) return;
     setMsg(null);
-    const previews = files.map((f) => URL.createObjectURL(f));
+    const previews = list.map((f) => URL.createObjectURL(f));
     setAnswers((prev) => ({ ...prev, [question.id]: { uploading: true, previews } }));
-
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const paths = [];
-      for (const file of files) {
+      for (const file of list) {
         const ext = (file.name.split(".").pop() || "png").toLowerCase();
         const path = `${session.user.id}/${quizId}/${question.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
         const { error: upErr } = await supabase.storage.from("quiz-screenshots").upload(path, file, { upsert: false });
@@ -115,6 +111,22 @@ export default function TakeQuiz() {
       await saveAnswer(question.id, { paths, previews });
     } catch (e) {
       setAnswers((prev) => ({ ...prev, [question.id]: { error: e.message || "Upload failed." } }));
+    }
+  };
+
+  // Paste-to-upload: focus the box and press Ctrl+V — no file picker needed.
+  const handlePaste = (question) => (e) => {
+    const items = e.clipboardData?.items || [];
+    const files = [];
+    for (const item of items) {
+      if (item.type && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      doUpload(question, files);
     }
   };
 
@@ -129,6 +141,7 @@ export default function TakeQuiz() {
   const isAnswered = (q) => {
     const a = answers[q.id];
     if (q.question_type === "screenshot") return a?.paths?.length > 0;
+    if (q.multi_correct) return a?.chosenIndices?.length > 0;
     return a?.chosenIndex !== undefined;
   };
   const unfinished = questions.filter((q) => !isAnswered(q));
@@ -175,7 +188,7 @@ export default function TakeQuiz() {
                 <div style={{ fontSize: 40 }}>🕐</div>
                 <div style={{ fontWeight: 700, marginTop: 8 }}>Submitted — under review</div>
                 <p className="mini" style={{ marginTop: 6, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>
-                  Your answers have been reviewed by AI and are now waiting on a final check from your admin before your score is confirmed. You'll be able to see your result once that's done.
+                  Your answers have been reviewed by AI and are now waiting on a final check from your admin before your score is confirmed.
                 </p>
               </>
             ) : (
@@ -202,28 +215,48 @@ export default function TakeQuiz() {
                     <div style={{ fontWeight: 700 }}>
                       {i + 1}. {q.question}
                       {q.question_type === "screenshot" && <span className="pill red" style={{ marginLeft: 8 }}>📷 Screenshot</span>}
+                      {q.multi_correct && <span className="pill" style={{ marginLeft: 8 }}>☑ Select all that apply</span>}
                     </div>
                     {isSkipped && <span className="pill" style={{ background: "#fff4e0", color: "#946200" }}>Skipped</span>}
                   </div>
 
                   {q.question_type === "screenshot" ? (
                     <div>
-                      <input type="file" accept="image/*" multiple onChange={(e) => uploadScreenshots(q, e.target.files)} />
-                      <div className="mini" style={{ marginTop: 4 }}>You can select multiple screenshots at once if your answer needs more than one.</div>
+                      <div
+                        tabIndex={0}
+                        onPaste={handlePaste(q)}
+                        style={{ border: "2px dashed var(--line)", borderRadius: 10, padding: 20, textAlign: "center", cursor: "text", outline: "none" }}
+                      >
+                        <div style={{ fontSize: 26 }}>📋</div>
+                        <div className="mini" style={{ marginTop: 6 }}>Click here, then press <b>Ctrl+V</b> (or ⌘V on Mac) to paste your screenshot</div>
+                        <div className="mini">You can paste more than one if your answer needs it.</div>
+                      </div>
                       {a?.previews?.length > 0 && (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                           {a.previews.map((url, pi) => <img key={pi} src={url} alt={`Your screenshot ${pi + 1}`} style={{ maxWidth: 160, borderRadius: 10 }} />)}
                         </div>
                       )}
                       {a?.uploading && <p className="mini" style={{ marginTop: 8 }}>Uploading…</p>}
-                      {a?.error && <p className="mini" style={{ marginTop: 8, color: "var(--red-dark)" }}>{a.error} — try uploading again.</p>}
+                      {a?.error && <p className="mini" style={{ marginTop: 8, color: "var(--red-dark)" }}>{a.error} — try pasting again.</p>}
                       {answered && <p className="mini" style={{ marginTop: 8, color: "#15803d" }}>✓ Saved — this will be reviewed after you submit.</p>}
+                    </div>
+                  ) : q.multi_correct ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {(q.options || []).map((opt, oi) => {
+                        const checked = (a?.chosenIndices || []).includes(oi);
+                        return (
+                          <label key={oi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: checked ? "#fdeaec" : "var(--input-bg)", cursor: "pointer" }}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleMulti(q, oi)} style={{ width: "auto" }} />
+                            <span style={{ fontSize: 14 }}>{opt}</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {(q.options || []).map((opt, oi) => (
                         <label key={oi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: a?.chosenIndex === oi ? "#fdeaec" : "var(--input-bg)", cursor: "pointer" }}>
-                          <input type="radio" name={q.id} checked={a?.chosenIndex === oi} onChange={() => pick(q.id, oi)} style={{ width: "auto" }} />
+                          <input type="radio" name={q.id} checked={a?.chosenIndex === oi} onChange={() => pickSingle(q.id, oi)} style={{ width: "auto" }} />
                           <span style={{ fontSize: 14 }}>{opt}</span>
                         </label>
                       ))}
@@ -247,7 +280,7 @@ export default function TakeQuiz() {
                   <div className="card pad" style={{ marginBottom: 14, background: "#fff4e0", borderColor: "#f0d9a8" }}>
                     <b style={{ fontSize: 13 }}>Still need answers for:</b>
                     <div className="mini" style={{ marginTop: 4 }}>
-                      {unfinished.map((q, idx) => `Q${questions.indexOf(q) + 1}`).join(", ")}
+                      {unfinished.map((q) => `Q${questions.indexOf(q) + 1}`).join(", ")}
                     </div>
                   </div>
                 )}
