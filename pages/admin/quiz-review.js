@@ -62,7 +62,14 @@ export default function QuizReview() {
     (questions || []).forEach((q) => {
       if (q.question_type !== "screenshot") {
         const a = (open.answers || {})[q.id];
-        if (a?.chosenIndex === q.correct_index) correctCount += 1;
+        const correctSet = new Set(Array.isArray(q.correct_indices) ? q.correct_indices : [q.correct_index]);
+        if (q.multi_correct) {
+          const chosen = new Set(a?.chosenIndices || []);
+          const matches = chosen.size === correctSet.size && [...chosen].every((i) => correctSet.has(i));
+          if (matches) correctCount += 1;
+        } else if (a?.chosenIndex !== undefined && correctSet.has(a.chosenIndex)) {
+          correctCount += 1;
+        }
       }
     });
 
@@ -74,6 +81,15 @@ export default function QuizReview() {
       status: "completed", score, passed, ai_review: updatedReview,
       reviewed_at: new Date().toISOString(), reviewed_by: me.id,
     }).eq("id", open.id);
+
+    // Once reviewed, the employee's raw answer screenshots are no longer
+    // needed — clear them out of storage to save space. Their reference
+    // examples (the admin's own library) are untouched, since those get
+    // reused across every future attempt.
+    const allSubmittedPaths = (open.ai_review || []).flatMap((r) => r.paths || []);
+    if (allSubmittedPaths.length > 0) {
+      await supabase.storage.from("quiz-screenshots").remove(allSubmittedPaths);
+    }
 
     setFinalizing(false);
     setOpen(null);
