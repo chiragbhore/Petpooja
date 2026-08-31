@@ -91,6 +91,21 @@ export default function AdminQuizzes() {
       return;
     }
     const { data } = supabase.storage.from("quiz-question-media").getPublicUrl(path);
+
+    // Uploading successfully doesn't guarantee employees can actually SEE
+    // it — if the bucket isn't truly set to Public, this URL will look
+    // fine here but 403 in the employee's browser. Check right now,
+    // instead of finding out later from an employee report.
+    try {
+      const check = await fetch(data.publicUrl, { method: "HEAD" });
+      if (!check.ok) {
+        setMsg("⚠ The file uploaded, but its link isn't publicly accessible (status " + check.status + "). Employees won't be able to see it. Go to Supabase → Storage → quiz-question-media → and confirm the bucket is set to PUBLIC, not private, then re-upload.");
+        return;
+      }
+    } catch {
+      setMsg("⚠ Could not verify the media link is publicly reachable — please double check the quiz-question-media bucket is set to Public before relying on this.");
+    }
+
     setQ(quizId, { media_url: data.publicUrl, media_type: isVideo ? "video" : "image" });
   };
   const removeQuestionMedia = (quizId) => setQ(quizId, { media_url: "", media_type: "" });
@@ -170,6 +185,75 @@ export default function AdminQuizzes() {
   };
 
   const delQuestion = async (id) => { await supabase.from("quiz_questions").delete().eq("id", id); load(); };
+
+  const downloadSampleCsv = () => {
+    const rows = [
+      ["Question", "Option A", "Option B", "Option C", "Option D", "Correct Answer(s)"],
+      ["What's the first step in a discovery call?", "Introduce yourself", "Pitch the product immediately", "Ask about pricing", "Close the deal", "A"],
+      ["Which of these are Petpooja products? (select all that apply)", "POS", "KDS", "Excel", "Captain App", "A,B,D"],
+    ];
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "assessment-questions-sample.csv";
+    a.click();
+  };
+
+  const parseCsv = (text) => {
+    const rows = [];
+    let row = [], field = "", inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+        else field += c;
+      } else {
+        if (c === '"') inQuotes = true;
+        else if (c === ",") { row.push(field); field = ""; }
+        else if (c === "\n" || c === "\r") {
+          if (c === "\r" && text[i + 1] === "\n") i++;
+          row.push(field); field = "";
+          if (row.length > 1 || row[0] !== "") rows.push(row);
+          row = [];
+        } else field += c;
+      }
+    }
+    if (field !== "" || row.length > 0) { row.push(field); rows.push(row); }
+    return rows;
+  };
+
+  const bulkUploadQuestions = async (quizId, file) => {
+    if (!file) return;
+    setMsg(null);
+    const text = await file.text();
+    const rows = parseCsv(text).slice(1); // drop header row
+    const startCount = (questionsByQuiz[quizId] || []).length;
+    const toInsert = [];
+    const skipped = [];
+
+    rows.forEach((r, idx) => {
+      const [question, a, b, c, d, correctStr] = r.map((v) => (v || "").trim());
+      if (!question) return; // blank row, ignore silently
+      const options = [a, b, c, d];
+      if (options.some((o) => !o)) { skipped.push(`Row ${idx + 2}: needs all 4 options filled in.`); return; }
+      const correctIndices = (correctStr || "").split(",").map((s) => s.trim().toUpperCase().charCodeAt(0) - 65).filter((i) => i >= 0 && i <= 3);
+      if (correctIndices.length === 0) { skipped.push(`Row ${idx + 2}: "${question.slice(0, 40)}" has no valid Correct Answer (use letters like A or A,C).`); return; }
+      toInsert.push({
+        quiz_id: quizId, question_type: "multiple_choice", question, options,
+        correct_index: correctIndices[0], correct_indices: correctIndices, multi_correct: correctIndices.length > 1,
+        answer_guide: null, reference_images: [], media_url: null, media_type: null,
+        sort_order: startCount + toInsert.length,
+      });
+    });
+
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from("quiz_questions").insert(toInsert);
+      if (error) { setMsg("Bulk upload failed: " + error.message); return; }
+    }
+    setMsg(`✓ Added ${toInsert.length} question${toInsert.length === 1 ? "" : "s"} from the file.` + (skipped.length > 0 ? ` ${skipped.length} row(s) skipped — ${skipped.join(" ")}` : ""));
+    load();
+  };
 
   const courseName = (id) => courses.find((c) => c.id === id)?.title || "—";
 
@@ -257,6 +341,17 @@ export default function AdminQuizzes() {
                     <button className="btn ghost" onClick={() => delQuestion(q.id)}>Remove</button>
                   </div>
                 ))}
+              </div>
+
+              <div style={{ marginTop: 14, background: "#eef1ff", borderRadius: 12, padding: 16 }}>
+                <div className="mini" style={{ fontWeight: 700, marginBottom: 6 }}>Bulk-upload questions (multiple choice only)</div>
+                <p className="mini" style={{ marginBottom: 10 }}>
+                  Fill in a spreadsheet and upload it here instead of adding questions one at a time — handy for handing off to other trainers to build assessments. Screenshot questions still need to be added individually, since they need real reference images.
+                </p>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <button type="button" className="btn outline sm" onClick={downloadSampleCsv}>⬇ Download sample CSV</button>
+                  <input type="file" accept=".csv" onChange={(e) => bulkUploadQuestions(quiz.id, e.target.files?.[0])} />
+                </div>
               </div>
 
               <div style={{ marginTop: 14, background: "#fafbfc", borderRadius: 12, padding: 16 }}>
