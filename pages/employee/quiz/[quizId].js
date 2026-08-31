@@ -18,13 +18,15 @@ export default function TakeQuiz() {
   const [quiz, setQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [attemptId, setAttemptId] = useState(null);
-  const [answers, setAnswers] = useState({}); // questionId -> { chosenIndex } | { chosenIndices } | { paths, previews }
+  const [answers, setAnswers] = useState({});
   const [skipped, setSkipped] = useState(new Set());
   const [timeLeft, setTimeLeft] = useState(null);
   const [result, setResult] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState(null);
   const [initializing, setInitializing] = useState(true);
+  const [current, setCurrent] = useState(0);
+  const [showSubmitPopup, setShowSubmitPopup] = useState(false);
 
   const timerRef = useRef(null);
   const autoSubmittedRef = useRef(false);
@@ -52,8 +54,7 @@ export default function TakeQuiz() {
         setAnswers(existing.answers || {});
         if (q?.time_limit_minutes) {
           const elapsed = Math.floor((Date.now() - new Date(existing.started_at).getTime()) / 1000);
-          const remaining = Math.max(0, q.time_limit_minutes * 60 - elapsed);
-          setTimeLeft(remaining);
+          setTimeLeft(Math.max(0, q.time_limit_minutes * 60 - elapsed));
         }
       } else {
         const { data: created } = await supabase
@@ -70,7 +71,7 @@ export default function TakeQuiz() {
   useEffect(() => {
     if (timeLeft === null || result) return;
     if (timeLeft <= 0) {
-      if (!autoSubmittedRef.current) { autoSubmittedRef.current = true; submit(true); }
+      if (!autoSubmittedRef.current) { autoSubmittedRef.current = true; doSubmit(); }
       return;
     }
     timerRef.current = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
@@ -87,34 +88,46 @@ export default function TakeQuiz() {
 
   const pickSingle = (questionId, index) => saveAnswer(questionId, { chosenIndex: index });
   const toggleMulti = (question, index) => {
-    const current = answers[question.id]?.chosenIndices || [];
-    const next = current.includes(index) ? current.filter((i) => i !== index) : [...current, index].sort();
+    const cur = answers[question.id]?.chosenIndices || [];
+    const next = cur.includes(index) ? cur.filter((i) => i !== index) : [...cur, index].sort();
     saveAnswer(question.id, { chosenIndices: next });
   };
 
   const doUpload = async (question, files) => {
-    const list = Array.from(files || []).slice(0, 5);
+    const existing = answers[question.id] || {};
+    const existingPaths = existing.paths || [];
+    const existingPreviews = existing.previews || [];
+    const room = Math.max(0, 5 - existingPaths.length);
+    const list = Array.from(files || []).slice(0, room);
     if (list.length === 0) return;
     setMsg(null);
-    const previews = list.map((f) => URL.createObjectURL(f));
-    setAnswers((prev) => ({ ...prev, [question.id]: { uploading: true, previews } }));
+    const newPreviews = list.map((f) => URL.createObjectURL(f));
+    setAnswers((prev) => ({ ...prev, [question.id]: { ...existing, uploading: true, previews: [...existingPreviews, ...newPreviews] } }));
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const paths = [];
+      const newPaths = [];
       for (const file of list) {
         const ext = (file.name.split(".").pop() || "png").toLowerCase();
         const path = `${session.user.id}/${quizId}/${question.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
         const { error: upErr } = await supabase.storage.from("quiz-screenshots").upload(path, file, { upsert: false });
         if (upErr) throw new Error(upErr.message);
-        paths.push(path);
+        newPaths.push(path);
       }
-      await saveAnswer(question.id, { paths, previews });
+      // Append to whatever was already pasted, instead of replacing it —
+      // this is what lets more than one paste build up into one answer.
+      await saveAnswer(question.id, { paths: [...existingPaths, ...newPaths], previews: [...existingPreviews, ...newPreviews] });
     } catch (e) {
-      setAnswers((prev) => ({ ...prev, [question.id]: { error: e.message || "Upload failed." } }));
+      setAnswers((prev) => ({ ...prev, [question.id]: { ...existing, error: e.message || "Upload failed." } }));
     }
   };
 
-  // Paste-to-upload: focus the box and press Ctrl+V — no file picker needed.
+  const removeShot = (question, idx) => {
+    const existing = answers[question.id] || {};
+    const paths = (existing.paths || []).filter((_, i) => i !== idx);
+    const previews = (existing.previews || []).filter((_, i) => i !== idx);
+    saveAnswer(question.id, paths.length > 0 ? { paths, previews } : undefined);
+  };
+
   const handlePaste = (question) => (e) => {
     const items = e.clipboardData?.items || [];
     const files = [];
@@ -124,18 +137,7 @@ export default function TakeQuiz() {
         if (file) files.push(file);
       }
     }
-    if (files.length > 0) {
-      e.preventDefault();
-      doUpload(question, files);
-    }
-  };
-
-  const toggleSkip = (questionId) => {
-    setSkipped((prev) => {
-      const s = new Set(prev);
-      if (s.has(questionId)) s.delete(questionId); else s.add(questionId);
-      return s;
-    });
+    if (files.length > 0) { e.preventDefault(); doUpload(question, files); }
   };
 
   const isAnswered = (q) => {
@@ -146,14 +148,24 @@ export default function TakeQuiz() {
   };
   const unfinished = questions.filter((q) => !isAnswered(q));
 
-  const submit = async (auto = false) => {
-    if (!auto && unfinished.length > 0) {
-      setMsg("Please finish every question before submitting — see the list below.");
-      return;
-    }
+  const goNext = () => {
+    if (!isAnswered(questions[current])) setSkipped((prev) => new Set(prev).add(questions[current].id));
+    if (current < questions.length - 1) setCurrent(current + 1);
+    else attemptFinish();
+  };
+  const goPrev = () => { if (current > 0) setCurrent(current - 1); };
+  const jumpTo = (idx) => setCurrent(idx);
+
+  const attemptFinish = () => {
+    if (unfinished.length > 0) setShowSubmitPopup(true);
+    else doSubmit();
+  };
+
+  const doSubmit = async () => {
     if (!attemptId) return;
     setMsg(null);
     setSubmitting(true);
+    setShowSubmitPopup(false);
     if (timerRef.current) clearTimeout(timerRef.current);
 
     const res = await fetch("/api/submit-quiz", { method: "POST", headers: await authHeader(), body: JSON.stringify({ attemptId }) });
@@ -165,23 +177,12 @@ export default function TakeQuiz() {
 
   if (loading || initializing || !quiz) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
-  return (
-    <div className="shell">
-      <Sidebar role="employee" me={me} />
-      <main className="content">
-        <div className="row-between" style={{ alignItems: "flex-start" }}>
-          <div>
-            <div className="link-back" onClick={() => router.back()}>← Back</div>
-            <h1 className="page">{quiz.title}</h1>
-            <p className="sub">Pass mark: {quiz.pass_percent}%</p>
-          </div>
-          {timeLeft !== null && !result && (
-            <span className={`pill ${timeLeft < 60 ? "red" : "gray"}`} style={{ fontVariantNumeric: "tabular-nums", fontSize: 16 }}>⏱ {formatClock(timeLeft)}</span>
-          )}
-        </div>
-        {msg && <div className="msg err">{msg}</div>}
-
-        {result ? (
+  if (result) {
+    return (
+      <div className="shell">
+        <Sidebar role="employee" me={me} />
+        <main className="content">
+          <h1 className="page">{quiz.title}</h1>
           <div className="card pad" style={{ textAlign: "center" }}>
             {result.needsReview ? (
               <>
@@ -203,93 +204,152 @@ export default function TakeQuiz() {
             )}
             <button className="btn primary" style={{ marginTop: 18 }} onClick={() => router.push("/employee/courses")}>Back to courses</button>
           </div>
-        ) : (
-          <>
-            {questions.map((q, i) => {
-              const a = answers[q.id];
-              const answered = isAnswered(q);
-              const isSkipped = skipped.has(q.id) && !answered;
-              return (
-                <div key={q.id} className="card pad" style={{ marginBottom: 14, borderColor: isSkipped ? "#f0b862" : undefined }}>
-                  <div className="row-between" style={{ marginBottom: 10 }}>
-                    <div style={{ fontWeight: 700 }}>
-                      {i + 1}. {q.question}
-                      {q.question_type === "screenshot" && <span className="pill red" style={{ marginLeft: 8 }}>📷 Screenshot</span>}
-                      {q.multi_correct && <span className="pill" style={{ marginLeft: 8 }}>☑ Select all that apply</span>}
-                    </div>
-                    {isSkipped && <span className="pill" style={{ background: "#fff4e0", color: "#946200" }}>Skipped</span>}
-                  </div>
+        </main>
+      </div>
+    );
+  }
 
-                  {q.question_type === "screenshot" ? (
-                    <div>
-                      <div
-                        tabIndex={0}
-                        onPaste={handlePaste(q)}
-                        style={{ border: "2px dashed var(--line)", borderRadius: 10, padding: 20, textAlign: "center", cursor: "text", outline: "none" }}
-                      >
-                        <div style={{ fontSize: 26 }}>📋</div>
-                        <div className="mini" style={{ marginTop: 6 }}>Click here, then press <b>Ctrl+V</b> (or ⌘V on Mac) to paste your screenshot</div>
-                        <div className="mini">You can paste more than one if your answer needs it.</div>
-                      </div>
-                      {a?.previews?.length > 0 && (
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                          {a.previews.map((url, pi) => <img key={pi} src={url} alt={`Your screenshot ${pi + 1}`} style={{ maxWidth: 160, borderRadius: 10 }} />)}
-                        </div>
-                      )}
-                      {a?.uploading && <p className="mini" style={{ marginTop: 8 }}>Uploading…</p>}
-                      {a?.error && <p className="mini" style={{ marginTop: 8, color: "var(--red-dark)" }}>{a.error} — try pasting again.</p>}
-                      {answered && <p className="mini" style={{ marginTop: 8, color: "#15803d" }}>✓ Saved — this will be reviewed after you submit.</p>}
-                    </div>
-                  ) : q.multi_correct ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {(q.options || []).map((opt, oi) => {
-                        const checked = (a?.chosenIndices || []).includes(oi);
-                        return (
-                          <label key={oi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: checked ? "#fdeaec" : "var(--input-bg)", cursor: "pointer" }}>
-                            <input type="checkbox" checked={checked} onChange={() => toggleMulti(q, oi)} style={{ width: "auto" }} />
-                            <span style={{ fontSize: 14 }}>{opt}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {(q.options || []).map((opt, oi) => (
-                        <label key={oi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: a?.chosenIndex === oi ? "#fdeaec" : "var(--input-bg)", cursor: "pointer" }}>
-                          <input type="radio" name={q.id} checked={a?.chosenIndex === oi} onChange={() => pickSingle(q.id, oi)} style={{ width: "auto" }} />
-                          <span style={{ fontSize: 14 }}>{opt}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
+  if (questions.length === 0) {
+    return (
+      <div className="shell">
+        <Sidebar role="employee" me={me} />
+        <main className="content">
+          <h1 className="page">{quiz.title}</h1>
+          <div className="card pad mini">This quiz has no questions yet.</div>
+        </main>
+      </div>
+    );
+  }
 
-                  {!answered && (
-                    <button type="button" className="btn ghost sm" style={{ marginTop: 10 }} onClick={() => toggleSkip(q.id)}>
-                      {isSkipped ? "Unskip" : "Skip for now"}
-                    </button>
-                  )}
+  const q = questions[current];
+  const a = answers[q.id];
+  const answered = isAnswered(q);
+  const isLast = current === questions.length - 1;
+
+  return (
+    <div className="shell">
+      <Sidebar role="employee" me={me} />
+      <main className="content">
+        <div className="row-between" style={{ alignItems: "flex-start" }}>
+          <div>
+            <div className="link-back" onClick={() => router.back()}>← Back</div>
+            <h1 className="page">{quiz.title}</h1>
+            <p className="sub">Pass mark: {quiz.pass_percent}% · Question {current + 1} of {questions.length}</p>
+          </div>
+          {timeLeft !== null && (
+            <span className={`pill ${timeLeft < 60 ? "red" : "gray"}`} style={{ fontVariantNumeric: "tabular-nums", fontSize: 16 }}>⏱ {formatClock(timeLeft)}</span>
+          )}
+        </div>
+        {msg && <div className="msg err">{msg}</div>}
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {questions.map((qq, i) => {
+            const done = isAnswered(qq);
+            const wasSkipped = skipped.has(qq.id) && !done;
+            return (
+              <button
+                key={qq.id}
+                onClick={() => jumpTo(i)}
+                className="chipbtn"
+                style={{
+                  width: 32, height: 32, padding: 0,
+                  background: i === current ? "#6d4aff" : done ? "#e8f6ee" : wasSkipped ? "#fff4e0" : "var(--input-bg)",
+                  color: i === current ? "#fff" : undefined,
+                  borderColor: i === current ? "#6d4aff" : undefined,
+                }}
+              >
+                {i + 1}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="card pad" style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>
+            {q.question}
+            {q.question_type === "screenshot" && <span className="pill red" style={{ marginLeft: 8 }}>📷 Screenshot</span>}
+            {q.multi_correct && <span className="pill" style={{ marginLeft: 8 }}>☑ Select all that apply</span>}
+          </div>
+
+          {q.media_url && (
+            <div style={{ marginBottom: 14 }}>
+              {q.media_type === "video" ? (
+                <video src={q.media_url} controls style={{ maxWidth: "100%", borderRadius: 10 }} />
+              ) : (
+                <img src={q.media_url} alt="Question reference" style={{ maxWidth: "100%", borderRadius: 10 }} />
+              )}
+            </div>
+          )}
+
+          {q.question_type === "screenshot" ? (
+            <div>
+              <div tabIndex={0} onPaste={handlePaste(q)} style={{ border: "2px dashed var(--line)", borderRadius: 10, padding: 20, textAlign: "center", cursor: "text", outline: "none" }}>
+                <div style={{ fontSize: 26 }}>📋</div>
+                <div className="mini" style={{ marginTop: 6 }}>Click here, then press <b>Ctrl+V</b> (or ⌘V on Mac) to paste your screenshot</div>
+                <div className="mini">Paste again to add more — up to 5 total.</div>
+              </div>
+              {a?.previews?.length > 0 && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  {a.previews.map((url, pi) => (
+                    <div key={pi} style={{ position: "relative" }}>
+                      <img src={url} alt={`Your screenshot ${pi + 1}`} style={{ maxWidth: 160, borderRadius: 10, display: "block" }} />
+                      <button type="button" onClick={() => removeShot(q, pi)}
+                        style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,.6)", color: "#fff", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer" }}>✕</button>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
+              )}
+              {a?.uploading && <p className="mini" style={{ marginTop: 8 }}>Uploading…</p>}
+              {a?.error && <p className="mini" style={{ marginTop: 8, color: "var(--red-dark)" }}>{a.error} — try pasting again.</p>}
+              {answered && <p className="mini" style={{ marginTop: 8, color: "#15803d" }}>✓ Saved — this will be reviewed after you submit.</p>}
+            </div>
+          ) : q.multi_correct ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(q.options || []).map((opt, oi) => {
+                const checked = (a?.chosenIndices || []).includes(oi);
+                return (
+                  <label key={oi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: checked ? "#fdeaec" : "var(--input-bg)", cursor: "pointer" }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleMulti(q, oi)} style={{ width: "auto" }} />
+                    <span style={{ fontSize: 14 }}>{opt}</span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(q.options || []).map((opt, oi) => (
+                <label key={oi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: a?.chosenIndex === oi ? "#fdeaec" : "var(--input-bg)", cursor: "pointer" }}>
+                  <input type="radio" name={q.id} checked={a?.chosenIndex === oi} onChange={() => pickSingle(q.id, oi)} style={{ width: "auto" }} />
+                  <span style={{ fontSize: 14 }}>{opt}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
 
-            {questions.length === 0 ? (
-              <div className="card pad mini">This quiz has no questions yet.</div>
-            ) : (
-              <>
-                {unfinished.length > 0 && (
-                  <div className="card pad" style={{ marginBottom: 14, background: "#fff4e0", borderColor: "#f0d9a8" }}>
-                    <b style={{ fontSize: 13 }}>Still need answers for:</b>
-                    <div className="mini" style={{ marginTop: 4 }}>
-                      {unfinished.map((q) => `Q${questions.indexOf(q) + 1}`).join(", ")}
-                    </div>
-                  </div>
-                )}
-                <button className="btn primary full" disabled={submitting} onClick={() => submit(false)}>
-                  {submitting ? "Submitting…" : "Submit answers"}
-                </button>
-              </>
-            )}
-          </>
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+          <button className="btn outline" onClick={goPrev} disabled={current === 0}>← Previous</button>
+          <div style={{ display: "flex", gap: 10 }}>
+            {!answered && <button className="btn ghost" onClick={goNext}>Skip for now</button>}
+            <button className="btn primary" disabled={submitting} onClick={goNext}>
+              {submitting ? "Submitting…" : isLast ? "Finish & Review" : "Next →"}
+            </button>
+          </div>
+        </div>
+
+        {showSubmitPopup && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.5)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }}>
+            <div className="card pad" style={{ width: 460, maxWidth: "100%" }}>
+              <b>You still have {unfinished.length} unanswered question{unfinished.length === 1 ? "" : "s"}</b>
+              <p className="mini" style={{ marginTop: 8, marginBottom: 12 }}>
+                {unfinished.map((qq) => `Q${questions.indexOf(qq) + 1}`).join(", ")} — you can go back and answer them, or submit as-is.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn outline full" onClick={() => { setShowSubmitPopup(false); jumpTo(questions.indexOf(unfinished[0])); }}>Go back and answer</button>
+                <button className="btn primary full" onClick={doSubmit} disabled={submitting}>{submitting ? "Submitting…" : "Submit anyway"}</button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>
