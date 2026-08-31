@@ -40,6 +40,13 @@ async function gradeOneScreenshotQuestion(question, submittedPaths) {
   }
   console.log("[quiz-grading] question:", question.id, "reference paths given:", referencePaths.length, "successfully downloaded:", referenceImages.length, "has answer_guide:", !!question.answer_guide);
 
+  // If the admin attached references but none could actually be loaded
+  // (a storage problem, not a content problem), be upfront about it
+  // rather than silently grading as if no reference existed at all.
+  if (referencePaths.length > 0 && referenceImages.length === 0) {
+    return { correct: false, feedback: "This question has reference images attached, but none of them could be loaded for comparison — likely a storage setup issue. Please check the 'quiz-reference-images' bucket and re-upload the reference, then manually review this answer." };
+  }
+
   const parts = [];
   const introText = [
     "You are grading an employee's assessment answer for a restaurant-POS sales training program.",
@@ -136,8 +143,14 @@ export default async function handler(req, res) {
       aiReview.push({ questionId: q.id, question: q.question, paths, correct: verdict.correct, feedback: verdict.feedback, adminOverride: null });
       if (verdict.correct) correctCount += 1;
     } else {
-      const chosen = a?.chosenIndex;
-      if (chosen === q.correct_index) correctCount += 1;
+      const correctSet = new Set(Array.isArray(q.correct_indices) ? q.correct_indices : [q.correct_index]);
+      if (q.multi_correct) {
+        const chosen = new Set(a?.chosenIndices || []);
+        const matches = chosen.size === correctSet.size && [...chosen].every((i) => correctSet.has(i));
+        if (matches) correctCount += 1;
+      } else {
+        if (a?.chosenIndex !== undefined && correctSet.has(a.chosenIndex)) correctCount += 1;
+      }
     }
   }
 
