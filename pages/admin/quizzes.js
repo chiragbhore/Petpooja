@@ -91,22 +91,9 @@ export default function AdminQuizzes() {
       return;
     }
     const { data } = supabase.storage.from("quiz-question-media").getPublicUrl(path);
-
-    // Uploading successfully doesn't guarantee employees can actually SEE
-    // it — if the bucket isn't truly set to Public, this URL will look
-    // fine here but 403 in the employee's browser. Check right now,
-    // instead of finding out later from an employee report.
-    try {
-      const check = await fetch(data.publicUrl, { method: "HEAD" });
-      if (!check.ok) {
-        setMsg("⚠ The file uploaded, but its link isn't publicly accessible (status " + check.status + "). Employees won't be able to see it. Go to Supabase → Storage → quiz-question-media → and confirm the bucket is set to PUBLIC, not private, then re-upload.");
-        return;
-      }
-    } catch {
-      setMsg("⚠ Could not verify the media link is publicly reachable — please double check the quiz-question-media bucket is set to Public before relying on this.");
-    }
-
     setQ(quizId, { media_url: data.publicUrl, media_type: isVideo ? "video" : "image" });
+    // If the preview below doesn't show it, the bucket likely isn't
+    // actually set to Public in Supabase — that's the real thing to check.
   };
   const removeQuestionMedia = (quizId) => setQ(quizId, { media_url: "", media_type: "" });
 
