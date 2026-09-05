@@ -27,6 +27,7 @@ export default function TakeQuiz() {
   const [initializing, setInitializing] = useState(true);
   const [current, setCurrent] = useState(0);
   const [showSubmitPopup, setShowSubmitPopup] = useState(false);
+  const [showCert, setShowCert] = useState(false);
 
   const timerRef = useRef(null);
   const autoSubmittedRef = useRef(false);
@@ -43,6 +44,24 @@ export default function TakeQuiz() {
       const { data: qs } = await supabase.from("quiz_questions").select("*").eq("quiz_id", quizId).order("sort_order", { ascending: true });
       setQuiz(q);
       setQuestions(qs || []);
+
+      // No retakes — if this employee already has a finished attempt
+      // (completed or awaiting admin review), show that result instead of
+      // letting them start over.
+      const { data: alreadyDone } = await supabase
+        .from("quiz_attempts").select("*")
+        .eq("quiz_id", quizId).eq("user_id", me.id).in("status", ["completed", "pending_review"])
+        .order("submitted_at", { ascending: false }).limit(1).maybeSingle();
+
+      if (alreadyDone) {
+        setResult({
+          score: alreadyDone.score, passed: alreadyDone.passed,
+          needsReview: alreadyDone.status === "pending_review", alreadyTaken: true,
+          completedAt: alreadyDone.reviewed_at || alreadyDone.submitted_at,
+        });
+        setInitializing(false);
+        return;
+      }
 
       const { data: existing } = await supabase
         .from("quiz_attempts").select("*")
@@ -93,25 +112,41 @@ export default function TakeQuiz() {
     saveAnswer(question.id, { chosenIndices: next });
   };
 
+  // Reads a File into base64 and uploads it through our own server to
+  // Google Drive, returning a usable link — replaces the old direct
+  // upload to Supabase Storage.
+  const uploadFileToDrive = async (file, question) => {
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const filename = `${quizId}-${question.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${file.name}`;
+    const res = await fetch("/api/drive-upload", {
+      method: "POST", headers: await authHeader(),
+      body: JSON.stringify({ base64Data, filename, mimeType: file.type || "application/octet-stream" }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Upload failed.");
+    return json.url;
+  };
+
   const doUpload = async (question, files) => {
     const existing = answers[question.id] || {};
     const existingPaths = existing.paths || [];
     const existingPreviews = existing.previews || [];
-    const room = Math.max(0, 5 - existingPaths.length);
+    const room = Math.max(0, 5 - existingPaths.length); // hard cap: 5 screenshots per answer
     const list = Array.from(files || []).slice(0, room);
     if (list.length === 0) return;
     setMsg(null);
     const newPreviews = list.map((f) => URL.createObjectURL(f));
     setAnswers((prev) => ({ ...prev, [question.id]: { ...existing, uploading: true, previews: [...existingPreviews, ...newPreviews] } }));
     try {
-      const { data: { session } } = await supabase.auth.getSession();
       const newPaths = [];
       for (const file of list) {
-        const ext = (file.name.split(".").pop() || "png").toLowerCase();
-        const path = `${session.user.id}/${quizId}/${question.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-        const { error: upErr } = await supabase.storage.from("quiz-screenshots").upload(path, file, { upsert: false });
-        if (upErr) throw new Error(upErr.message);
-        newPaths.push(path);
+        const url = await uploadFileToDrive(file, question);
+        newPaths.push(url);
       }
       // Append to whatever was already pasted, instead of replacing it —
       // this is what lets more than one paste build up into one answer.
@@ -178,12 +213,16 @@ export default function TakeQuiz() {
   if (loading || initializing || !quiz) return <div className="center-screen"><div className="mini">Loading…</div></div>;
 
   if (result) {
+    const showCertificate = result.passed && !result.needsReview;
     return (
       <div className="shell">
         <Sidebar role="employee" me={me} />
         <main className="content">
           <h1 className="page">{quiz.title}</h1>
           <div className="card pad" style={{ textAlign: "center" }}>
+            {result.alreadyTaken && (
+              <div className="mini" style={{ marginBottom: 12, color: "#946200" }}>You've already completed this assessment — retakes aren't allowed.</div>
+            )}
             {result.needsReview ? (
               <>
                 <div style={{ fontSize: 40 }}>🕐</div>
@@ -197,14 +236,39 @@ export default function TakeQuiz() {
                 <div className="kpi" style={{ fontSize: 44 }}>{result.score}%</div>
                 <div style={{ marginTop: 12 }}>
                   <span className={`pill ${result.passed ? "red" : "gray"}`} style={result.passed ? { background: "#e8f6ee", color: "#15803d" } : {}}>
-                    {result.passed ? "✓ Passed" : "Not passed — you can retry"}
+                    {result.passed ? "✓ Passed" : "Not passed"}
                   </span>
                 </div>
               </>
             )}
-            <button className="btn primary" style={{ marginTop: 18 }} onClick={() => router.push("/employee/courses")}>Back to courses</button>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
+              {showCertificate && <button className="btn outline" onClick={() => setShowCert(true)}>🎓 View Certificate</button>}
+              <button className="btn primary" onClick={() => router.push("/employee/courses")}>Back to courses</button>
+            </div>
           </div>
         </main>
+
+        {showCert && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(17,22,26,.6)", display: "grid", placeItems: "center", padding: 20, zIndex: 60 }} onClick={() => setShowCert(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", maxWidth: 700, width: "100%", borderRadius: 12 }}>
+              <div id="certificate-printable" style={{ position: "relative", width: "100%", lineHeight: 0 }}>
+                <img src="/certificate-template.png" alt="" style={{ width: "100%", display: "block" }} />
+                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "100%", textAlign: "center", fontFamily: "Georgia, serif" }}>
+                  <div style={{ fontSize: "clamp(20px, 4vw, 34px)", fontWeight: 700, color: "#1a1a1a" }}>{me?.full_name}</div>
+                </div>
+                <div style={{ position: "absolute", bottom: "12%", left: "50%", transform: "translateX(-50%)", width: "100%", textAlign: "center", fontFamily: "Georgia, serif" }}>
+                  <div style={{ fontSize: "clamp(11px, 1.6vw, 15px)", color: "#444" }}>
+                    {quiz.title} · {result.completedAt ? new Date(result.completedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : new Date().toLocaleDateString()} · Score: {result.score}%
+                  </div>
+                </div>
+              </div>
+              <div className="no-print" style={{ display: "flex", gap: 10, padding: 16 }}>
+                <button className="btn outline full" onClick={() => setShowCert(false)}>Close</button>
+                <button className="btn primary full" onClick={() => window.print()}>⬇ Download as PDF</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
